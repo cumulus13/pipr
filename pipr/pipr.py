@@ -110,8 +110,13 @@ def run_pip_install(packages, force_retry=False):
     return run_pip_install_from_file(REQ_INSTALL_FILE, force_retry=force_retry)
 
 
-def check_packages(reqs, force_retry=False):
+def check_packages(reqs, force_retry=False, force_install=False):
     """Check installed packages vs requirements and collect installs if needed."""
+    
+    if force_install:
+        for pkg, spec in reqs:
+            run_pip_install([f"{pkg}{spec or ''}"], force_retry=force_retry)
+        return reqs
     table = Table(title="Package Version Checker", header_style="bold white")
     table.add_column("Package", style="bold")
     table.add_column("Installed", style="cyan")
@@ -183,12 +188,14 @@ def check_packages(reqs, force_retry=False):
     else:
         console.print("[green]All requirements satisfied. Nothing to install.[/green]")
 
+    return to_install
 
 def main():
     parser = argparse.ArgumentParser(description="Package requirements checker", formatter_class=CustomRichHelpFormatter, prog='pipr')
     parser.add_argument("-f", "--force-retry", action="store_true",
                         help="Force retry installation automatically if error occurs")
-    
+    parser.add_argument("-F", '--force-install', action="store_true",
+                        help="Force install packages without asking for confirmation")
     args = parser.parse_args()
 
     # If requirements-install.txt exists and is not empty -> install directly
@@ -207,7 +214,7 @@ def main():
         console.print(f"\n:cross_mark: [#FFFF00]requirements.txt is empty ![/]")
         sys.exit(1)
 
-    check_packages(requirements, force_retry=args.force_retry)
+    check_packages(requirements, force_retry=args.force_retry, force_install=args.force_install)
 
 if __name__ == "__main__":
     main()
