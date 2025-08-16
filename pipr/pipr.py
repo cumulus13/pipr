@@ -198,12 +198,15 @@ def main():
         sys.exit(0)
 
     if not Path(REQ_FILE).exists():
-        console.print(f":cross_mark: [red]File {REQ_FILE} not found![/red]")
-        print("\n")
+        console.print(f"\n:cross_mark: [red]File {REQ_FILE} not found![/red]\n")
         parser.print_help()
         sys.exit(1)
 
     requirements = parse_requirements(REQ_FILE)
+    if len(requirements) < 1:
+        console.print(f"\n:cross_mark: [#FFFF00]requirements.txt is empty ![/]")
+        sys.exit(1)
+
     check_packages(requirements, force_retry=args.force_retry)
 
 if __name__ == "__main__":
