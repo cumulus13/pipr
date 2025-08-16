@@ -115,8 +115,22 @@ def check_packages(reqs, force_retry=False, force_install=False):
     
     if force_install:
         for pkg, spec in reqs:
-            run_pip_install([f"{pkg}{spec or ''}"], force_retry=force_retry)
+            cmd = [sys.executable, "-m", "pip", "install", f"{pkg}{spec or ''}"]
+            print(f"{' '.join(cmd)}")
+            try:
+                subprocess.check_call(cmd)
+            except Exception as e:
+                if force_retry:
+                    console.print(f"[yellow]Retrying installation (force mode)...[/yellow]")
+                    while 1:
+                        try:
+                            subprocess.check_call(cmd)
+                            break
+                        except Exception as e:
+                            console.print(f"[red]❌ Install error:[/red] {e}")
+                            send_growl("Install Error", f"Failed to install {pkg}", priority=2)
         return reqs
+    
     table = Table(title="Package Version Checker", header_style="bold white")
     table.add_column("Package", style="bold")
     table.add_column("Installed", style="cyan")
