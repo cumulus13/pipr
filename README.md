@@ -35,9 +35,10 @@ pip install rich packaging gntp licface
    ```
 3. Optionally, add to your PATH or create an alias
 
-4. or simple way, use `pip`
+4. or use `pip`
+```bash
    pip install git+https://github.com/cumulus13/pipr
-
+```
 ## 📋 Usage
 
 ### Basic Usage
@@ -54,9 +55,12 @@ python pipr.py
 python pipr.py --help
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-f, --force-retry` | 🔄 Force retry installation automatically if error occurs |
+| Option                | Description                                      |
+|-----------------------|--------------------------------------------------|
+| `-f, --force-retry`   | Force retry installation automatically           |
+|                       |     if error occurs                              |
+| `-F, --force-install` | Force install packages without asking for        |
+|                       |     confirmation                                 |
 
 ### Requirements File Format
 
@@ -140,13 +144,13 @@ Automatically handles platform-specific dependencies:
 
 ```
                 Package Version Checker                
-┏━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━┳━━━━━━━━━━━━━━━━━━━━━┓
-┃ Package   ┃ Installed ┃ Required ┃   ┃ Status              ┃
-┡━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+┏━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ Package   ┃ Installed ┃ Required ┃     ┃ Status              ┃
+┡━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
 │ requests  │ 2.28.1    │ >=2.25.0 │ ℹ️ │ OK (within >=2.25.0)│
 │ numpy     │ none      │ >=1.20.0 │ ❌ │ Not Installed       │
 │ pandas    │ 1.2.0     │ ==1.3.0  │ ⚠️ │ Mismatch (need ==…) │
-└───────────┴───────────┴──────────┴───┴─────────────────────┘
+└───────────┴───────────┴──────────┴─────┴─────────────────────┘
 ```
 
 ## 🛠️ Error Handling
@@ -188,6 +192,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [Support me on Patreon](https://www.patreon.com/cumulus13)
 
-[medium](https://www.medium.com/@cumulus13)
+[Medium](https://medium.com/@cumulus13/pipr-the-python-package-manager-you-never-knew-you-needed-336088218236?postPublishedType=initial)
 
 ⭐ **Star this repository if you find it helpful!**
