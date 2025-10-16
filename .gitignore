@@ -19,3 +19,6 @@ __pycache__/
 
 # Added entries (1 items)
 *.py.1
+
+# Added entries (1 items)
+*.c

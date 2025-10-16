@@ -1,4 +1,28 @@
 include README.md
-include pipr/__version__.py
 include __version__.py
-global-exclude pipr.py.1 
+include LICENSE*
+
+# Include package metadata files
+include pipr/__init__.py
+include pipr/__version__.py
+
+# Include pre-compiled binaries in sdist
+recursive-include pipr *.so
+recursive-include pipr *.pyd
+recursive-include build *.so
+recursive-include build *.pyd
+
+# Include images
+recursive-include pipr *.png
+
+# Exclude source files from binary wheels (but keep in sdist)
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .git*
+global-exclude *.ini
+global-exclude *.c
+global-exclude *.py.*
+
+# For sdist, we want binaries; for bdist_wheel, exclude source
+prune pipr/pipr.py
+prune pipr/pipr.pyx

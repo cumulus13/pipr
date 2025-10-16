@@ -1,9 +1,83 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Extension
+from setuptools.dist import Distribution
+from setuptools.command.build_py import build_py
+from setuptools.command.sdist import sdist
+import sys
 from pathlib import Path
 import shutil
+import os
+import re
 
 NAME = 'pipr'
-shutil.copy('__version__.py', str(Path(NAME) / '__version__.py'))
+shutil.copy2('__version__.py', str(Path(NAME) / '__version__.py'))
+
+# Custom build_py to exclude .py files when building with Cython
+class BuildPyExcludeSource(build_py):
+    """Custom build_py that excludes source .py files for cythonized modules"""
+    def find_package_modules(self, package, package_dir):
+        modules = super().find_package_modules(package, package_dir)
+        if hasattr(self.distribution, 'ext_modules') and self.distribution.ext_modules:
+            return [
+                (pkg, module, filename) 
+                for pkg, module, filename in modules
+                if module != 'pipr'  # Exclude pipr.py since we have pipr.pyd/.so
+            ]
+        return modules
+
+# Custom sdist command to include pre-compiled binaries
+class SdistWithBinaries(sdist):
+    """Custom sdist that includes pre-compiled .so/.pyd files"""
+    
+    def make_release_tree(self, base_dir, files):
+        """Create release tree and add compiled binaries"""
+        super().make_release_tree(base_dir, files)
+        
+        # After creating the release tree, copy any compiled binaries
+        print("\nAdding pre-compiled binaries to sdist...")
+        
+        # Find all .so and .pyd files in the build directory
+        binary_patterns = [
+            'build/**/*.so',
+            'build/**/*.pyd',
+            f'{NAME}/**/*.so',
+            f'{NAME}/**/*.pyd',
+        ]
+        
+        binaries_found = []
+        for pattern in binary_patterns:
+            binaries_found.extend(glob.glob(pattern, recursive=True))
+        
+        # Copy binaries to sdist
+        for binary in binaries_found:
+            # Determine relative path
+            if binary.startswith('build/'):
+                # Extract path after build/lib*/
+                parts = binary.split(os.sep)
+                try:
+                    lib_idx = next(i for i, p in enumerate(parts) if p.startswith('lib'))
+                    rel_path = os.path.join(*parts[lib_idx + 1:])
+                except (StopIteration, IndexError):
+                    rel_path = os.path.basename(binary)
+            else:
+                rel_path = binary
+            
+            dest = os.path.join(base_dir, rel_path)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            
+            if os.path.exists(binary):
+                shutil.copy2(binary, dest)
+                print(f"  ✓ Added: {rel_path}")
+        
+        if binaries_found:
+            print(f"✅ Added {len(binaries_found)} binary file(s) to sdist")
+        else:
+            print("⚠️  No pre-compiled binaries found - sdist will require compilation")
+
+
+class BinaryDistribution(Distribution):
+    """Distribution which always forces a binary package with platform name"""
+    def has_ext_modules(foo):
+        return True
 
 def get_version():
     try:
@@ -24,6 +98,118 @@ def requirements():
     except Exception as e:
         print(f"Error reading requirements: {e}")
     return []
+
+_extensions = []
+extensions = None
+cmdclass = {}
+
+# Try to build Cython extensions
+try:
+    from Cython.Build import cythonize
+    
+    print("Preparing Cython compilation...")
+    
+    _extensions = [
+        Extension(
+            'pipr.pipr', 
+            ['pipr/pipr.pyx'],
+            extra_compile_args=['/O2'] if sys.platform == 'win32' else ['-O3'],
+        ),
+    ]
+    
+    extensions = cythonize(
+        _extensions,
+        compiler_directives={
+            'language_level': '3',
+            'embedsignature': True,
+            'boundscheck': False,
+            'wraparound': False,
+        }
+    )
+    
+    # Use custom build_py to exclude source files from wheels
+    cmdclass['build_py'] = BuildPyExcludeSource
+    
+    # Use custom sdist to include binaries
+    cmdclass['sdist'] = SdistWithBinaries
+    
+    # MANIFEST.in for Cython build
+    with open('MANIFEST.in', 'w') as fm:
+        fm.write("""include README.md
+include __version__.py
+include LICENSE*
+
+# Include package metadata files
+include pipr/__init__.py
+include pipr/__version__.py
+
+# Include pre-compiled binaries in sdist
+recursive-include pipr *.so
+recursive-include pipr *.pyd
+recursive-include build *.so
+recursive-include build *.pyd
+
+# Include images
+recursive-include pipr *.png
+
+# Exclude source files from binary wheels (but keep in sdist)
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .git*
+global-exclude *.ini
+global-exclude *.c
+
+# For sdist, we want binaries; for bdist_wheel, exclude source
+prune pipr/pipr.py
+prune pipr/pipr.pyx
+""")
+    
+    print("✓ Cython extensions configured successfully")
+    print("✓ Binary wheels will exclude .py/.pyx/.c files")
+    print("✓ Sdist will include pre-compiled .so/.pyd files if available")
+        
+except ImportError as e:
+    print(f"✗ Cython not installed: {e}")
+    print("  Install with: pip install cython")
+    print("  Building without Cython extensions - source files will be included")
+    
+    with open('MANIFEST.in', 'w') as fm:
+        fm.write("""include README.md
+include __version__.py
+recursive-include pipr *.py
+recursive-include pipr *.png
+include pipr/__init__.py
+include pipr/__version__.py
+
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .git*
+global-exclude *.ini
+
+include LICENSE*
+""")
+
+except Exception as e:
+    print(f"✗ Cython build failed: {e}")
+    print("  Building without Cython extensions - source files will be included")
+    if os.getenv('TRACEBACK', '0').lower() in ['1', 'true', 'yes']:
+        print(traceback.format_exc())
+    
+    with open('MANIFEST.in', 'w') as fm:
+        fm.write("""include README.md
+include __version__.py
+recursive-include pipr *.py
+recursive-include pipr *.png
+include pipr/__init__.py
+include pipr/__version__.py
+
+global-exclude *.py[cod]
+global-exclude __pycache__
+global-exclude .git*
+global-exclude *.ini
+
+include LICENSE*
+""")
 
 setup(
     name=NAME,
@@ -54,4 +240,8 @@ setup(
     ],
     python_requires='>=3.7',
     license="MIT",
+    package_data={
+        'pipr': ['*.png', f'*{sys.version_info.major}{sys.version_info.minor}*.pyd'] if sys.platform == 'win32' else [f'*{sys.version_info.major}{sys.version_info.minor}*.so', ],
+    },
+    ext_modules=extensions,
 )
