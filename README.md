@@ -55,12 +55,13 @@ python pipr.py
 python pipr.py --help
 ```
 
-| Option                | Description                                      |
-|-----------------------|--------------------------------------------------|
-| `-f, --force-retry`   | Force retry installation automatically           |
-|                       |     if error occurs                              |
-| `-F, --force-install` | Force install packages without asking for        |
-|                       |     confirmation                                 |
+| Option                | Description                                          |
+|-----------------------|------------------------------------------------------|
+| `-f, --force-retry`   | Force retry installation automatically               |
+|                       |     if error occurs                                  |
+| `-F, --force-install` | Force install packages without asking for            |
+|                       |     confirmation                                     |
+| `-s, --summary`       | Show summary table only (non-interactive, no install)|
 
 ### Requirements File Format
 
@@ -147,7 +148,7 @@ Automatically handles platform-specific dependencies:
 ┏━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Package   ┃ Installed ┃ Required ┃     ┃ Status              ┃
 ┡━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
-│ requests  │ 2.28.1    │ >=2.25.0 │ ℹ️ │ OK (within >=2.25.0)│
+│ requests  │ 2.28.1    │ >=2.25.0 │ ✅ │ OK (within >=2.25.0)│
 │ numpy     │ none      │ >=1.20.0 │ ❌ │ Not Installed       │
 │ pandas    │ 1.2.0     │ ==1.3.0  │ ⚠️ │ Mismatch (need ==…) │
 └───────────┴───────────┴──────────┴─────┴─────────────────────┘

@@ -19,7 +19,7 @@ from rich import traceback as rtraceback
 from gntp.notifier import GrowlNotifier
 from licface import CustomRichHelpFormatter
 
-rtraceback.install(show_locals = False, width=os.get_terminal_size()[0], theme = 'fruity', word_wrap=True)
+rtraceback.install(show_locals=False, width=os.get_terminal_size()[0], theme='fruity', word_wrap=True)
 
 REQ_FILE = "requirements.txt"
 REQ_INSTALL_FILE = "requirements-install.txt"
@@ -110,7 +110,7 @@ def run_pip_install(packages, force_retry=False):
     return run_pip_install_from_file(REQ_INSTALL_FILE, force_retry=force_retry)
 
 
-def check_packages(reqs, force_retry=False, force_install=False):
+def check_packages(reqs, force_retry=False, force_install=False, summary_only=False):
     """Check installed packages vs requirements and collect installs if needed."""
     
     if force_install:
@@ -130,7 +130,7 @@ def check_packages(reqs, force_retry=False, force_install=False):
                             console.print(f"[red]❌ Install error:[/red] {e}")
                             send_growl("Install Error", f"Failed to install {pkg}", priority=2)
         return reqs
-    
+
     table = Table(title="Package Version Checker", header_style="bold white")
     table.add_column("Package", style="bold")
     table.add_column("Installed", style="cyan")
@@ -152,10 +152,11 @@ def check_packages(reqs, force_retry=False, force_install=False):
         if inst_ver is None:
             status = "[red]Not Installed[/red]"
             emoji = "❌"
-            send_growl(f"{pkg} Missing", f"{pkg} is not installed.")
-            if Confirm.ask(f"Install {pkg} (found none) {spec or ''}?"):
+            if not summary_only:
+                send_growl(f"{pkg} Missing", f"{pkg} is not installed.")
+            if not summary_only and Confirm.ask(f"Install {pkg} (found none) {spec or ''}?"):
                 to_install.append(f"{pkg}{spec or ''}")
-            table.add_row(pkg, "none", spec or "-", emoji, status)
+            table.add_row(pkg, "", spec or "-", emoji, status)
             continue
 
         iv = version.parse(inst_ver)
@@ -165,34 +166,43 @@ def check_packages(reqs, force_retry=False, force_install=False):
             if "==" in spec:  # exact match required
                 req_ver = spec.split("==")[1]
                 if iv == version.parse(req_ver):
-                    emoji = "ℹ️"
+                    emoji = "✅"
                     status = "[#AAAAFF]Exact match[/]"
-                    send_growl(f"{pkg} OK", f"{pkg} {inst_ver} matches {spec}")
+                    if not summary_only:
+                        send_growl(f"{pkg} OK", f"{pkg} {inst_ver} matches {spec}")
                 else:
-                    emoji = "⚠️"
+                    emoji = "⚠"
                     status = f"[#FFFF00]Mismatch (need {spec})[/]"
-                    send_growl(f"{pkg} Mismatch", f"{pkg} {inst_ver} != required {spec}")
-                    if Confirm.ask(f"Change {pkg} (found {inst_ver}) to {spec}?"):
+                    if not summary_only:
+                        send_growl(f"{pkg} Mismatch", f"{pkg} {inst_ver} != required {spec}")
+                    if not summary_only and Confirm.ask(f"Change {pkg} (found {inst_ver}) to {spec}?"):
                         to_install.append(f"{pkg}{spec}")
             else:
                 if iv in spec_set:
-                    emoji = "ℹ️"
+                    emoji = "✅"
                     status = f"[#AAAAFF]OK (within {spec})[/]"
-                    send_growl(f"{pkg} OK", f"{pkg} {inst_ver} satisfies {spec}")
+                    if not summary_only:
+                        send_growl(f"{pkg} OK", f"{pkg} {inst_ver} satisfies {spec}")
                 else:
-                    emoji = "⚠️"
+                    emoji = "⚠"
                     status = f"[#FFFF00]Not in range {spec}[/]"
-                    send_growl(f"{pkg} Out of range", f"{pkg} {inst_ver} not in {spec}")
-                    if Confirm.ask(f"Install {pkg} (found {inst_ver}) {spec}?"):
+                    if not summary_only:
+                        send_growl(f"{pkg} Out of range", f"{pkg} {inst_ver} not in {spec}")
+                    if not summary_only and Confirm.ask(f"Install {pkg} (found {inst_ver}) {spec}?"):
                         to_install.append(f"{pkg}{spec}")
         else:
-            emoji = "ℹ️"
+            emoji = "✅"
             status = "[#AAAAFF]No version rule[/]"
-            send_growl(f"{pkg} Checked", f"{pkg} {inst_ver}")
+            if not summary_only:
+                send_growl(f"{pkg} Checked", f"{pkg} {inst_ver}")
 
-        table.add_row(pkg, inst_ver or "none", spec or "-", emoji, status)
+        table.add_row(pkg, inst_ver or "-", spec or "-", emoji, status)
 
     console.print(table)
+
+    if summary_only:
+        # Do not install anything in summary mode
+        return []
 
     if to_install:
         console.print(f"[yellow]Installing these packages:[/yellow] {', '.join(to_install)}")
@@ -204,13 +214,23 @@ def check_packages(reqs, force_retry=False, force_install=False):
 
     return to_install
 
+
 def main():
+    global REQ_FILE
     parser = argparse.ArgumentParser(description="Package requirements checker", formatter_class=CustomRichHelpFormatter, prog='pipr')
+
+    parser.add_argument('FILE', nargs='?', help="requirements file")
     parser.add_argument("-f", "--force-retry", action="store_true",
                         help="Force retry installation automatically if error occurs")
     parser.add_argument("-F", '--force-install', action="store_true",
                         help="Force install packages without asking for confirmation")
+    parser.add_argument("-s", "--summary", action="store_true",
+                        help="Show summary table only (non-interactive, no install)")
+
     args = parser.parse_args()
+
+    if args.FILE:
+        REQ_FILE = args.FILE
 
     # If requirements-install.txt exists and is not empty -> install directly
     if Path(REQ_INSTALL_FILE).exists() and Path(REQ_INSTALL_FILE).stat().st_size > 0:
@@ -228,7 +248,13 @@ def main():
         console.print(f"\n:cross_mark: [#FFFF00]requirements.txt is empty ![/]")
         sys.exit(1)
 
-    check_packages(requirements, force_retry=args.force_retry, force_install=args.force_install)
+    check_packages(
+        requirements,
+        force_retry=args.force_retry,
+        force_install=args.force_install,
+        summary_only=args.summary
+    )
+
 
 if __name__ == "__main__":
     main()
