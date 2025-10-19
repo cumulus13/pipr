@@ -21,7 +21,6 @@ global-exclude __pycache__
 global-exclude .git*
 global-exclude *.ini
 global-exclude *.c
-global-exclude *.py.*
 
 # For sdist, we want binaries; for bdist_wheel, exclude source
 prune pipr/pipr.py
