@@ -22,3 +22,6 @@ __pycache__/
 
 # Added entries (1 items)
 *.c
+
+# Added entries (1 items)
+*.pyd

@@ -4,6 +4,20 @@
 
 import os
 import sys
+import traceback
+import ast
+try:
+    from ctraceback import print_traceback as tprint
+except:
+    def tprint(*args, **kwargs):
+        traceback.print_exc()
+os.environ.update({'NO_LOGGING':'1'})
+try:
+    os.environ.pop('LOGGING')
+except:
+    pass
+from richcolorlog import setup_logging
+logger = setup_logging(exceptions=['gntp'])
 import platform
 import re
 import subprocess
@@ -18,6 +32,7 @@ from rich.prompt import Confirm
 from rich import traceback as rtraceback
 from gntp.notifier import GrowlNotifier
 from licface import CustomRichHelpFormatter
+from typing import Set, Optional, List
 
 rtraceback.install(show_locals=False, width=os.get_terminal_size()[0], theme='fruity', word_wrap=True)
 
@@ -69,9 +84,12 @@ def parse_requirements(file_path):
                 line = pkg
 
             match = re.match(r"([A-Za-z0-9_.-]+)(.*)", line)
+            logger.alert(f"match: {match}")
             if match:
                 name, spec = match.groups()
+                logger.info(f"name: {name}")
                 spec = spec.strip()
+                logger.info(f"spec: {spec}")
                 reqs.append((name, spec if spec else None))
     return reqs
 
@@ -110,9 +128,9 @@ def run_pip_install(packages, force_retry=False):
     return run_pip_install_from_file(REQ_INSTALL_FILE, force_retry=force_retry)
 
 
-def check_packages(reqs, force_retry=False, force_install=False, summary_only=False):
+def check_packages(reqs, force_retry=False, force_install=False, summary_only=False, show=True):
     """Check installed packages vs requirements and collect installs if needed."""
-    
+    logger.warning(f"reqs: {reqs}")
     if force_install:
         for pkg, spec in reqs:
             cmd = [sys.executable, "-m", "pip", "install", f"{pkg}{spec or ''}"]
@@ -131,12 +149,13 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                             send_growl("Install Error", f"Failed to install {pkg}", priority=2)
         return reqs
 
-    table = Table(title="Package Version Checker", header_style="bold white")
-    table.add_column("Package", style="bold")
-    table.add_column("Installed", style="cyan")
-    table.add_column("Required", style="magenta")
-    table.add_column("", style="bold")  # emoji column
-    table.add_column("Status")
+    if show:
+        table = Table(title="Package Version Checker", header_style="bold white")
+        table.add_column("Package", style="bold")
+        table.add_column("Installed", style="cyan")
+        table.add_column("Required", style="magenta")
+        table.add_column("", style="bold")  # emoji column
+        table.add_column("Status")
 
     to_install = []  # collect install/upgrade/downgrade tasks
 
@@ -147,6 +166,7 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
             inst_ver = None
 
         status = ""
+        status_num = 0
         emoji = ""
 
         if inst_ver is None:
@@ -198,13 +218,14 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
 
         table.add_row(pkg, inst_ver or "-", spec or "-", emoji, status)
 
-    console.print(table)
+    if show:
+        console.print(table)
 
     if summary_only:
         # Do not install anything in summary mode
         return []
 
-    if to_install:
+    if to_install and show:
         console.print(f"[yellow]Installing these packages:[/yellow] {', '.join(to_install)}")
         success = run_pip_install(to_install, force_retry=force_retry)
         if not success:
@@ -214,6 +235,253 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
 
     return to_install
 
+def _has_toml_support() -> bool:
+    """Check if toml/tomli is available without importing them globally."""
+    if sys.version_info >= (3, 11):
+        return True  # tomllib is built-in
+    try:
+        __import__('toml')
+        return True
+    except ImportError:
+        try:
+            __import__('tomli')
+            return True
+        except ImportError:
+            return False
+
+def _extract_package_name(dep_string: str) -> Optional[str]:
+    dep = dep_string.split('[')[0].split(';')[0].strip()
+    for op in ['>=', '<=', '==', '!=', '~=', '>', '<']:
+        dep = dep.split(op)[0]
+    return dep.lower() if dep else None
+
+def _extract_from_list_node(node) -> Set[str]:
+    deps = set()
+    if isinstance(node, ast.List):
+        for elt in node.elts:
+            val = elt.value if isinstance(elt, ast.Constant) else \
+                  elt.s if hasattr(elt, 's') else None
+            if val:
+                logger.notice(f"val: {val}")
+                # pkg = _extract_package_name(val)
+                # if pkg: deps.add(pkg)
+                deps.add(val)
+    return deps
+
+def convert_spec(spec: str):
+    """
+    Convert Poetry-style version constraints into PEP 440 (setup.py compatible).
+    Supports:
+        ^ caret
+        ~ tilde
+        >= <= < > ==
+        *
+        exact
+        ranges
+        comma-separated
+        union (|)
+    """
+    spec = spec.strip()
+
+    # ---------------------------
+    # 1. UNION ("|")
+    # ---------------------------
+    if "|" in spec:
+        parts = [convert_spec(x) for x in spec.split("|")]
+        return " | ".join(parts)
+
+    # ---------------------------
+    # 2. Comma separated
+    # ---------------------------
+    if "," in spec:
+        parts = [convert_spec(x) for x in spec.split(",")]
+        return ",".join(parts)
+
+    # ---------------------------
+    # 3. CARET ^X.Y.Z
+    # ---------------------------
+    if spec.startswith("^"):
+        version = spec[1:].strip()
+        return convert_caret(version)
+
+    # ---------------------------
+    # 4. TILDE ~X.Y.Z
+    # ---------------------------
+    if spec.startswith("~"):
+        version = spec[1:].strip()
+        return convert_tilde(version)
+
+    # ---------------------------
+    # 5. WILDCARD "1.*"
+    # ---------------------------
+    if "*" in spec:
+        return convert_wildcard(spec)
+
+    # ---------------------------
+    # 6. RANGE OPERATORS
+    # ---------------------------
+    if re.match(r"^(>=|<=|<|>|==)", spec):
+        return spec.replace(" ", "")
+
+    # ---------------------------
+    # 7. EXACT version
+    # ---------------------------
+    if re.match(r"^\d+(\.\d+)*$", spec):
+        return f"=={spec}"
+
+    # raise ValueError(f"Unsupported spec: {spec}")
+    print(f"WARNING: Unsupported spec: {spec}")
+    return ""
+
+
+# ---------------------------
+# CARET
+# ---------------------------
+def convert_caret(version: str):
+    parts = version.split(".")
+    parts += ["0"] * (3 - len(parts))
+    major, minor, patch = map(int, parts)
+
+    if major > 0:
+        upper = f"{major + 1}.0.0"
+    elif minor > 0:
+        upper = f"0.{minor + 1}.0"
+    else:
+        upper = f"0.0.{patch + 1}"
+
+    return f">={version},<{upper}"
+
+
+# ---------------------------
+# TILDE
+# ---------------------------
+def convert_tilde(version: str):
+    parts = version.split(".")
+    parts += ["0"] * (3 - len(parts))
+    major, minor, patch = map(int, parts)
+
+    upper = f"{major}.{minor + 1}.0"
+    return f">={version},<{upper}"
+
+
+# ---------------------------
+# WILDCARD
+# ---------------------------
+def convert_wildcard(spec: str):
+    # "1.*" → >=1.0,<2.0
+    parts = spec.split(".")
+    major = int(parts[0])
+
+    if len(parts) == 2 and parts[1] == "*":
+        return f">={major}.0,< {major+1}.0"
+
+    # "1.2.*" → >=1.2.0,<1.3.0
+    if len(parts) == 3 and parts[2] == "*":
+        minor = int(parts[1])
+        return f">={major}.{minor}.0,<{major}.{minor+1}.0"
+
+    # raise ValueError(f"Unsupported wildcard: {spec}")
+    print(f"WARNING: Unsupported wildcard: {spec}")
+    return ""
+
+def parse_deps(deps):
+    reqs = []
+    for line in deps:
+        match = re.match(r"([A-Za-z0-9_.-]+)(.*)", line)
+        logger.alert(f"match: {match}")
+        if match:
+            name, spec = match.groups()
+            logger.info(f"name: {name}")
+            spec = spec.strip()
+            logger.info(f"spec: {spec}")
+            reqs.append((name, spec if spec else None))
+    return reqs
+
+def parse_pyproject_toml(pyproject_path = None) -> List[str]:
+    deps = set()
+    pyproject_path = pyproject_path or Path.cwd() / 'pyproject.toml'
+    if not pyproject_path.exists():
+        return []
+
+    if not _has_toml_support():
+        console.print("[bold yellow]Warning: toml/tomli not installed, cannot parse pyproject.toml[/]")
+        console.print("[bold cyan]Install with:[/] pip install toml  [bold yellow]or[/] pip install tomli")
+        logger.notice(f"deps: {deps}")
+        return []
+
+    try:
+        if sys.version_info >= (3, 11):
+            import tomllib as toml
+            with open(pyproject_path, 'rb') as f:
+                data = toml.load(f)
+        else:
+            try:
+                import toml
+            except ImportError:
+                import tomli as toml
+            with open(pyproject_path, 'r', encoding='utf-8') as f:
+                data = toml.load(f)
+
+        if 'project' in data and 'dependencies' in data['project']:
+            for dep in data['project']['dependencies']:
+                # pkg = _extract_package_name(dep)
+                # if pkg: deps.add(pkg)
+                logger.warning(f"dep: {dep}")
+                deps.add(pkg)
+        if 'tool' in data and 'poetry' in data['tool']:
+            poetry = data['tool']['poetry']
+            logger.warning(f"poetry: {poetry}")
+            for key in ['dependencies']:#, 'dev-dependencies']:
+                if key in poetry:
+                    for dep, ver in poetry[key].items():
+                        if isinstance(ver, dict):
+                            ver = ver.get('version')
+                        logger.alert(f"dep: {dep}")
+                        logger.alert(f"ver: {ver}")
+                        spec = convert_spec(ver)
+                        logger.alert(f"spec: {spec}")
+                        if dep != 'python':
+                            # logger.alert(f"dep: {dep}")
+                            deps.add(f"{dep}{spec}")
+        console.print(f"[bold green]✓ Parsed pyproject.toml:[/] [bold cyan]{len(deps)} dependencies[/]")
+    except Exception as e:
+        console.print(f"[bold red]Error parsing pyproject.toml:[/] {e}")
+    logger.notice(f"deps: {deps}")
+    deps = parse_deps(deps)
+    logger.notice(f"deps: {deps}")
+    return deps
+
+def parse_setup_py(path = None) -> Set[str]:
+    deps = set()
+    path = path or Path.cwd() / 'setup.py'
+    if not path.exists():
+        logger.notice(f"deps: {deps}")
+        return deps
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            tree = ast.parse(f.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                is_setup = (isinstance(func, ast.Name) and func.id == 'setup') or \
+                           (isinstance(func, ast.Attribute) and func.attr == 'setup')
+                if is_setup:
+                    for kw in node.keywords:
+                        if kw.arg == 'install_requires':
+                            logger.emergency(f"kw.value: {kw.value}")
+                            deps.update(_extract_from_list_node(kw.value))
+
+        logger.critical(f"deps: {deps}")
+        if deps:
+            deps = parse_deps(deps)
+            logger.notice(f"deps: {deps}")
+            console.print(f"[bold green]✓ Parsed setup.py:[/] [bold cyan]{len(deps)} dependencies[/]")
+    except Exception as e:
+        console.print(f"[bold yellow]Warning: Could not parse setup.py:[/] {e}")
+        if str(os.getenv('TRACEBACK', '0').lower()) in ['1', 'yes', 'true']:
+            tprint(*sys.exc_info(), None, False, True)
+    logger.notice(f"deps: {deps}")
+    return deps
 
 def main():
     global REQ_FILE
@@ -226,27 +494,77 @@ def main():
                         help="Force install packages without asking for confirmation")
     parser.add_argument("-s", "--summary", action="store_true",
                         help="Show summary table only (non-interactive, no install)")
+    parser.add_argument("-d", "--debug", action="store_true",
+                        help="Debugging process (logging)")
 
     args = parser.parse_args()
+
+    # os.environ.update({'NO_LOGGING':'1'})
+    # try:
+    #     os.environ.pop('LOGGING')
+    # except:
+    #     pass
+
+    if args.debug:
+        try:
+            os.environ.pop('NO_LOGGING')
+        except:
+            pass
+        os.environ.update({'LOGGING':'1'})
 
     if args.FILE:
         REQ_FILE = args.FILE
 
+    requirement_files = [
+        Path.cwd() / 'setup.py',
+        Path.cwd() / 'pyproject.toml',
+        Path.cwd() / REQ_FILE,
+        Path.cwd() / REQ_INSTALL_FILE,
+    ]
+
+    REQ_FOUND = []
+    requirements = []
+
+    for i in requirement_files:
+        if Path(i).exists() and Path(i).stat().st_size > 0:
+            REQ_FOUND.append(Path(i))
+
     # If requirements-install.txt exists and is not empty -> install directly
-    if Path(REQ_INSTALL_FILE).exists() and Path(REQ_INSTALL_FILE).stat().st_size > 0:
+    # if Path(REQ_INSTALL_FILE).exists() and Path(REQ_INSTALL_FILE).stat().st_size > 0:
+    if Path(REQ_INSTALL_FILE) in REQ_FOUND:
         console.print(f"[yellow]Found {REQ_INSTALL_FILE}, installing directly...[/yellow]")
         run_pip_install_from_file(REQ_INSTALL_FILE, force_retry=args.force_retry)
         sys.exit(0)
 
-    if not Path(REQ_FILE).exists():
-        console.print(f"\n:cross_mark: [red]File {REQ_FILE} not found![/red]\n")
-        parser.print_help()
-        sys.exit(1)
+    if not args.FILE:
+        # if not Path(REQ_FILE).exists():
+        if not REQ_FOUND:
+            # console.print(f"\n:cross_mark: [red]File {REQ_FILE} not found![/red]\n")
+            console.print(f"\n:cross_mark: [red]No one requirements files found![/red]\n")
+            parser.print_help()
+            sys.exit(1)
 
-    requirements = parse_requirements(REQ_FILE)
+        requirements = parse_setup_py()
+        logger.warning(f"requirements: {requirements}")
+        if len(requirements) < 1:
+            console.print(f"\n:cross_mark: [#FFFF00]'setup.py' has no requirements or no file ![/]")
+            console.print(f"\n🚀 [#00FFFF]try to get from 'pyproject.toml' ...[/]")
+            requirements = parse_pyproject_toml()
+            logger.warning(f"requirements: {requirements}")
+            if len(requirements) < 1:
+                console.print(f"\n:cross_mark: [#FFFF00]'pyproject.toml' has no requirements or no file ![/]")
+    logger.emergency(f"requirements: {requirements}")
     if len(requirements) < 1:
-        console.print(f"\n:cross_mark: [#FFFF00]requirements.txt is empty ![/]")
-        sys.exit(1)
+        if not Path(REQ_FILE).exists():
+            console.print(f"\n:cross_mark: [red bold]File {REQ_FILE} not found![/]\n")
+            parser.print_help()
+            sys.exit(1)
+        logger.notice(f"REQ_FILE: {REQ_FILE}")
+        requirements = parse_requirements(REQ_FILE)
+        logger.warning(f"requirements: {requirements}")
+        if len(requirements) < 1:
+            console.print(f"\n:cross_mark: [#FFFF00]requirements.txt is empty ![/]")
+            sys.exit(1)
 
     check_packages(
         requirements,
