@@ -2,3 +2,5 @@ rich
 licface
 gntp
 richcolorlog
+packaging
+requests

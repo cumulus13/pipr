@@ -25,3 +25,8 @@ __pycache__/
 
 # Added entries (1 items)
 *.pyd
+# PT backup directory
+.pt/
+
+# Added entries (1 items)
+bck/

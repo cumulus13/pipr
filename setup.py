@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import os
 import re
+import hashlib
 
 NAME = 'pipr'
 shutil.copy2('__version__.py', str(Path(NAME) / '__version__.py'))
@@ -99,6 +100,17 @@ def requirements():
         print(f"Error reading requirements: {e}")
     return []
 
+def calculate_file_hash(filepath):
+    """Calculate MD5 hash of a file"""
+    hash_md5 = hashlib.md5()
+    try:
+        with open(filepath, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
+    except FileNotFoundError:
+        return None
+
 _extensions = []
 extensions = None
 cmdclass = {}
@@ -108,6 +120,22 @@ try:
     from Cython.Build import cythonize
     
     print("Preparing Cython compilation...")
+
+    # Define file paths
+    pipr_py = 'pipr/pipr.py'
+    pipr_pyx = 'pipr/pipr.pyx'
+    
+    # Check if both files exist and compare hashes
+    py_hash = calculate_file_hash(pipr_py)
+    pyx_hash = calculate_file_hash(pipr_pyx)
+    
+    # If hashes are different or .pyx doesn't exist, copy .py to .pyx
+    if py_hash != pyx_hash:
+        if py_hash is not None:  # Source file exists
+            print(f"Copying {pipr_py} -> {pipr_pyx} (hash mismatch or missing .pyx)")
+            shutil.copy2(pipr_py, pipr_pyx)
+        else:
+            print(f"Warning: Source file {pipr_py} not found")
     
     _extensions = [
         Extension(
@@ -158,6 +186,10 @@ global-exclude __pycache__
 global-exclude .git*
 global-exclude *.ini
 global-exclude *.c
+global-exclude *.1
+global-exclude *.2
+global-exclude *.0
+global-exclude bck/
 
 # For sdist, we want binaries; for bdist_wheel, exclude source
 prune pipr/pipr.py
@@ -185,6 +217,11 @@ global-exclude *.py[cod]
 global-exclude __pycache__
 global-exclude .git*
 global-exclude *.ini
+global-exclude *.1
+global-exclude *.0
+global-exclude *.2
+global-exclude bck/
+global-exclude *.c
 
 include LICENSE*
 """)
@@ -207,6 +244,11 @@ global-exclude *.py[cod]
 global-exclude __pycache__
 global-exclude .git*
 global-exclude *.ini
+global-exclude *.1
+global-exclude *.0
+global-exclude *.2
+global-exclude bck/
+global-exclude *.c
 
 include LICENSE*
 """)
@@ -217,9 +259,23 @@ setup(
     packages=[NAME.replace("-","_")],
     include_package_data=True,
     install_requires=requirements(),
+    extras_require={
+        "color": [
+            "richcolorlog",
+        ],
+        "requests": [
+            "requests",
+        ],
+        "request": [
+            "requests",
+        ],
+        "rich": [
+            "rich>=10.0.0",
+        ]
+    },
     entry_points={
         'console_scripts': [
-            f'pipr = {NAME}.pipr:main',
+            f'pipr = {NAME}.__main__:main',
         ],
     },
     author="Hadi Cahyadi",
@@ -232,7 +288,6 @@ setup(
         "Development Status :: 4 - Beta",
         "Environment :: Console",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
         "Operating System :: OS Independent",
         "Topic :: Software Development :: Libraries",
