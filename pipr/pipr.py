@@ -96,6 +96,8 @@ from gntp.notifier import GrowlNotifier
 from licface import CustomRichHelpFormatter
 from typing import Set, Optional, List, Tuple
 
+from pypi_info import PyPIClient, PackageInfoDisplay
+
 REQ_FILE = "requirements.txt"
 REQ_INSTALL_FILE = "requirements-install.txt"
 console = Console()
@@ -158,8 +160,10 @@ PACKAGE_MAPPINGS = {
 }
 
 
-def send_growl(title, message, priority=1):
+def send_growl(title, message, priority=1, active = True):
     """Send notification via Growl."""
+    if not active:
+        return False
     try:
         growl.notify(
             noteType="Update",
@@ -168,9 +172,10 @@ def send_growl(title, message, priority=1):
             sticky=False,
             priority=priority
         )
+        return True
     except Exception as e:
         console.print(f"[red]Growl error:[/red] {e}")
-
+    return False
 
 def get_pypi_info(package_name):
     """Get package info from PyPI JSON API with fallback to urllib."""
@@ -555,8 +560,29 @@ def run_pip_install(packages, force_retry=False, auto_mode=False):
 
     return run_pip_install_from_file(REQ_INSTALL_FILE, force_retry=force_retry)
 
+def miss_conflict_check(pkg, spec):
+    version_conflicts = []
+    missing_packages = []
+    
+    # Check if package is installed
+    try:
+        inst_ver = metadata.version(pkg)
+    except metadata.PackageNotFoundError:
+        inst_ver = None
+    
+    # Check for version conflicts
+    if inst_ver is not None and spec:
+        iv = version.parse(inst_ver)
+        spec_set = SpecifierSet(spec)
+        
+        if iv not in spec_set:
+            version_conflicts.append((pkg, inst_ver, spec))
+    elif inst_ver is None:
+        missing_packages.append((pkg, spec))
 
-def check_packages(reqs, force_retry=False, force_install=False, summary_only=False, show=True, auto_mode=True):
+    return version_conflicts, missing_packages
+
+def check_packages(reqs, force_retry=False, force_install=False, summary_only=False, show=True, auto_mode=True, send_notification=True): #, package_name = None):
     """Check installed packages vs requirements and collect installs if needed.
     
     Args:
@@ -568,7 +594,10 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
     python_conflicts = []
     version_conflicts = []
     missing_packages = []
-    
+
+    # if package_name and isinstance(package_name, (list or tuple)):
+    #     version_conflicts, missing_packages = miss_conflict_check(package_name[0], package_name[1])
+
     console.print("\n[cyan]🔎 Checking PyPI for package information...[/cyan]")
     
     for pkg, spec in reqs:
@@ -584,20 +613,21 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                     python_conflicts.append(error_msg)
         
         # Check if package is installed
-        try:
-            inst_ver = metadata.version(pkg)
-        except metadata.PackageNotFoundError:
-            inst_ver = None
+        version_conflicts, missing_packages = miss_conflict_check(pkg, spec)
+        # try:
+        #     inst_ver = metadata.version(pkg)
+        # except metadata.PackageNotFoundError:
+        #     inst_ver = None
         
-        # Check for version conflicts
-        if inst_ver is not None and spec:
-            iv = version.parse(inst_ver)
-            spec_set = SpecifierSet(spec)
+        # # Check for version conflicts
+        # if inst_ver is not None and spec:
+        #     iv = version.parse(inst_ver)
+        #     spec_set = SpecifierSet(spec)
             
-            if iv not in spec_set:
-                version_conflicts.append((pkg, inst_ver, spec))
-        elif inst_ver is None:
-            missing_packages.append((pkg, spec))
+        #     if iv not in spec_set:
+        #         version_conflicts.append((pkg, inst_ver, spec))
+        # elif inst_ver is None:
+        #     missing_packages.append((pkg, spec))
     
     # If there are Python version conflicts, abort
     if python_conflicts:
@@ -605,10 +635,11 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
         for conflict in python_conflicts:
             console.print(f"  • [red]{conflict}[/red]")
         console.print("\n[yellow]Please upgrade your Python version or adjust your requirements.[/yellow]")
-        sys.exit(1)
+        if __name__ == '__main__':
+            sys.exit(1)
     
     # If there are version conflicts, use virtual environment
-    if version_conflicts and not force_install:
+    if version_conflicts and not force_install and auto_mode:
         console.print("\n[bold yellow]⚠️  Package Version Conflicts Detected:[/bold yellow]")
         for pkg, installed, required in version_conflicts:
             console.print(f"  • {pkg}: installed={installed}, required={required}")
@@ -636,8 +667,8 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                             break
                         except Exception as e:
                             console.print(f"[red]✗ Install error:[/red] {e}")
-                            send_growl("Install Error", f"Failed to install {pkg}", priority=2)
-        return reqs
+                            send_growl("Install Error", f"Failed to install {pkg}", priority=2, active=send_notification)
+        return reqs, [], python_conflicts, version_conflicts, missing_packages
 
     if show:
         table = Table(title="Package Version Checker", header_style="bold white")
@@ -665,16 +696,16 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
 
         if inst_ver is None:
             # Package not installed - auto-install in auto_mode (now default)
-            status = "[red]Not Installed[/red]"
-            emoji = "✗"
+            status = "[bold red]Not Installed[/]"
+            emoji = "🚫"
             if not summary_only:
-                send_growl(f"{pkg} Missing", f"{pkg} is not installed.")
+                send_growl(f"{pkg} Missing", f"{pkg} is not installed.", active=send_notification)
             
             if auto_mode:
                 # Auto-install missing packages without asking
                 to_install.append(f"{pkg}{spec or ''}")
-                status = "[yellow]Will auto-install[/yellow]"
-                emoji = "⬇️"
+                status = "[bold #FFFF00]Will auto-install[/]"
+                emoji = "⚡"
             
             if show:
                 table.add_row(pkg, "", spec or "-", pypi_latest, emoji, status)
@@ -688,30 +719,30 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                 req_ver = spec.split("==")[1]
                 if iv == version.parse(req_ver):
                     emoji = "✅"
-                    status = "[#AAAAFF]Exact match[/]"
+                    status = "[bold #AAAAFF]Exact match[/]"
                     if not summary_only:
-                        send_growl(f"{pkg} OK", f"{pkg} {inst_ver} matches {spec}")
+                        send_growl(f"{pkg} OK", f"{pkg} {inst_ver} matches {spec}", active=send_notification)
                 else:
                     emoji = "⚠ "
-                    status = f"[#FFFF00]Mismatch (need {spec})[/]"
+                    status = f"[bold #FFFF00]Mismatch (need {spec})[/]"
                     if not summary_only:
-                        send_growl(f"{pkg} Mismatch", f"{pkg} {inst_ver} != required {spec}")
+                        send_growl(f"{pkg} Mismatch", f"{pkg} {inst_ver} != required {spec}", active=send_notification)
             else:
                 if iv in spec_set:
                     emoji = "✅"
-                    status = f"[#AAAAFF]OK (within {spec})[/]"
+                    status = f"[bold #AAAAFF]OK (within {spec})[/]"
                     if not summary_only:
-                        send_growl(f"{pkg} OK", f"{pkg} {inst_ver} satisfies {spec}")
+                        send_growl(f"{pkg} OK", f"{pkg} {inst_ver} satisfies {spec}", active=send_notification)
                 else:
                     emoji = "⚠ "
-                    status = f"[#FFFF00]Not in range {spec}[/]"
+                    status = f"[bold #FFFF00]Not in range {spec}[/]"
                     if not summary_only:
-                        send_growl(f"{pkg} Out of range", f"{pkg} {inst_ver} not in {spec}")
+                        send_growl(f"{pkg} Out of range", f"{pkg} {inst_ver} not in {spec}", active=send_notification)
         else:
             emoji = "✅"
-            status = "[#AAAAFF]No version rule[/]"
+            status = "[bold #AAAAFF]No version rule[/]"
             if not summary_only:
-                send_growl(f"{pkg} Checked", f"{pkg} {inst_ver}")
+                send_growl(f"{pkg} Checked", f"{pkg} {inst_ver}", active=send_notification)
 
         if show:
             table.add_row(pkg, inst_ver or "-", spec or "-", pypi_latest, emoji, status)
@@ -721,23 +752,23 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
 
     if summary_only:
         # Do not install anything in summary mode
-        return []
+        return reqs, to_install, python_conflicts, version_conflicts, missing_packages
 
     # Auto-install missing packages (default behavior)
     if to_install and auto_mode:
-        console.print(f"\n[green]📦 Auto-installing {len(to_install)} package(s):[/green]")
+        console.print(f"\n[green]📦 Auto-installing {len(to_install)} package(s):[/]")
         for pkg in to_install:
             console.print(f"  • {pkg}")
         success = run_pip_install(to_install, force_retry=force_retry, auto_mode=True)
         if success:
-            console.print(f"[green]✓ Successfully installed {len(to_install)} package(s)[/green]")
+            console.print(f"[green]✅ Successfully installed {len(to_install)} package(s)[/]")
         else:
-            console.print("[red]✗ Some packages failed to install.[/red]")
+            console.print("[bold red]❌ Some packages failed to install.[/]")
 
     if not to_install:
-        console.print("\n[green]✓ All requirements satisfied. Nothing to install.[/green]")
+        console.print("\n[green]✅ All requirements satisfied. Nothing to install.[/green]")
 
-    return to_install
+    return reqs, to_install, python_conflicts, version_conflicts, missing_packages
 
 def _has_toml_support() -> bool:
     """Check if toml/tomli is available without importing them globally."""
@@ -951,7 +982,7 @@ def parse_pyproject_toml(pyproject_path = None) -> List[str]:
 def parse_setup_py(path = None) -> Set[str]:
     deps = set()
     path = path or Path.cwd() / 'setup.py'
-    if not path.exists():
+    if not Path(path).exists():
         logger.notice(f"deps: {deps}")
         return deps
     try:
@@ -980,6 +1011,29 @@ def parse_setup_py(path = None) -> Set[str]:
     logger.notice(f"deps: {deps}")
     return deps
 
+def get_requirements_from_pypi(package):
+    try:
+        client = PyPIClient()
+        display = PackageInfoDisplay()
+
+        package_data = client.get_package_info(package)
+        info = package_data.get('info', [])
+        requires_dist = info.get('requires_dist', [])
+        requires_python = info.get('requires_python', None)
+        if not requires_dist and not requires_python:
+            return []
+
+        deps = display._parse_dependencies(requires_dist)
+        if deps and deps.get('core'):
+            data = [(i['name'], i.get('version')) for i in deps.get('core')]
+            return data
+        # return deps if deps else []
+
+    except Exception as e:
+        tprint(e)
+
+    return []
+
 def main():
     global REQ_FILE
     parser = argparse.ArgumentParser(
@@ -997,6 +1051,14 @@ def main():
                         help="Force install packages without asking for confirmation")
     parser.add_argument("-s", "--summary", action="store_true",
                         help="Show summary table only (non-interactive, no install)")
+    parser.add_argument("-s", "--check", action="store_true",
+                        help="Same as '-s': show summary table only (non-interactive, no install)")
+    parser.add_argument('-i', "--pypi", action="store", 
+                        help = "Compare package direct to package on pypi.org")
+    parser.add_argument('-n', "--no-install", action="store_true", 
+                        help = "Don't auto install")
+    parser.add_argument('-z', "--no-show", action="store_true", 
+                        help = "Don't show table and force no table")
     parser.add_argument("-d", "--debug", action="store_true",
                         help="Debugging process (logging)")
 
@@ -1049,6 +1111,8 @@ def main():
             parser.print_help()
             sys.exit(1)
 
+    elif args.pypi:
+        requirements = get_requirements_from_pypi(args.pypi)
     else:
         # No FILE argument - check for standard requirement files
         requirement_files = [
@@ -1127,12 +1191,14 @@ def main():
         console.print(f"[bold cyan]📁 Detected directory scan mode {'(recursive)' if args.recursive else '(non-recursive)'}[/]")
 
     # Check and install packages (auto mode is now default)
+    # def check_packages(reqs, force_retry=False, force_install=False, summary_only=False, show=True, auto_mode=True, send_notification=True):
     check_packages(
         requirements,
         force_retry=args.force_retry,
         force_install=args.force_install,
-        summary_only=args.summary,
-        auto_mode=True  # Always True now (default behavior)
+        summary_only=args.summary or args.check,
+        show=True if args.summary or args.check else True if not args.no_show else False,
+        auto_mode=True if not args.no_install else False  # Always True now (default behavior)
     )
 
 

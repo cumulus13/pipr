@@ -30,3 +30,6 @@ __pycache__/
 
 # Added entries (1 items)
 bck/
+
+# Added entries (1 items)
+*.log
