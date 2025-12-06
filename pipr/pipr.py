@@ -603,11 +603,14 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
     for pkg, spec in reqs:
         # Get PyPI info
         pypi_data = get_pypi_info(pkg)
+        logger.debug(f"pypi_data: {pypi_data}")
         
         # Check Python version compatibility
         if pypi_data:
             requires_python = get_python_version_requirement(pypi_data)
+            logger.debug(f"requires_python: {requires_python}")
             if requires_python:
+                logger.debug(f"requires_python: {requires_python}")
                 is_compatible, error_msg = check_python_version_compatibility(pkg, requires_python)
                 if not is_compatible:
                     python_conflicts.append(error_msg)
@@ -671,11 +674,11 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
         return reqs, [], python_conflicts, version_conflicts, missing_packages
 
     if show:
-        table = Table(title="Package Version Checker", header_style="bold white")
+        table = Table(title="Package Version Checker", header_style="bold #FFAA7F")
         table.add_column("Package", style="bold")
-        table.add_column("Installed", style="cyan")
-        table.add_column("Required", style="magenta")
-        table.add_column("PyPI Latest", style="green")
+        table.add_column("Installed", style="bold #00FFFF")
+        table.add_column("Required", style="bold #AA55FF")
+        table.add_column("PyPI Latest", style="bold #FFFF00")
         table.add_column("", style="bold")  # emoji column
         table.add_column("Status")
 
@@ -740,7 +743,7 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                         send_growl(f"{pkg} Out of range", f"{pkg} {inst_ver} not in {spec}", active=send_notification)
         else:
             emoji = "✅"
-            status = "[bold #AAAAFF]No version rule[/]"
+            status = "[bold #0055FF]No version rule[/]"
             if not summary_only:
                 send_growl(f"{pkg} Checked", f"{pkg} {inst_ver}", active=send_notification)
 
@@ -766,7 +769,7 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
             console.print("[bold red]❌ Some packages failed to install.[/]")
 
     if not to_install:
-        console.print("\n[green]✅ All requirements satisfied. Nothing to install.[/green]")
+        console.print("\n✅ [bold #FFAAFF]All requirements satisfied. Nothing to install.[/]")
 
     return reqs, to_install, python_conflicts, version_conflicts, missing_packages
 
@@ -1019,13 +1022,16 @@ def get_requirements_from_pypi(package):
         package_data = client.get_package_info(package)
         info = package_data.get('info', [])
         requires_dist = info.get('requires_dist', [])
+        logger.debug(f"requires_dist: {requires_dist}")
         requires_python = info.get('requires_python', None)
+        logger.debug(f"requires_python: {requires_python}")
         if not requires_dist and not requires_python:
             return []
 
         deps = display._parse_dependencies(requires_dist)
+        logger.debug(f"deps: {deps}")
         if deps and deps.get('core'):
-            data = [(i['name'], i.get('version')) for i in deps.get('core')]
+            data = [(i['name'], i.get('version') if i.get('version') != 'any' else '') for i in deps.get('core')]
             return data
         # return deps if deps else []
 
@@ -1051,10 +1057,12 @@ def main():
                         help="Force install packages without asking for confirmation")
     parser.add_argument("-s", "--summary", action="store_true",
                         help="Show summary table only (non-interactive, no install)")
-    parser.add_argument("-s", "--check", action="store_true",
+    parser.add_argument("-c", "--check", action="store_true",
                         help="Same as '-s': show summary table only (non-interactive, no install)")
     parser.add_argument('-i', "--pypi", action="store", 
                         help = "Compare package direct to package on pypi.org")
+    # parser.add_argument('-I', "--install", action="store_true", 
+                        # help = "Install if no config. same as '-F' but checking before")
     parser.add_argument('-n', "--no-install", action="store_true", 
                         help = "Don't auto install")
     parser.add_argument('-z', "--no-show", action="store_true", 
@@ -1077,6 +1085,7 @@ def main():
 
     # Check if FILE argument is provided and what type it is
     if args.FILE:
+        logger.debug("processing args.FILE ...")
         file_path = Path(args.FILE)
         
         if file_path.is_file():
@@ -1112,8 +1121,11 @@ def main():
             sys.exit(1)
 
     elif args.pypi:
+        logger.debug("processing args.pypi ...")
         requirements = get_requirements_from_pypi(args.pypi)
+        logger.debug(f"requirements: {requirements}")
     else:
+        logger.debug("processing alternative (else) ...")
         # No FILE argument - check for standard requirement files
         requirement_files = [
             Path.cwd() / 'setup.py',
@@ -1192,7 +1204,7 @@ def main():
 
     # Check and install packages (auto mode is now default)
     # def check_packages(reqs, force_retry=False, force_install=False, summary_only=False, show=True, auto_mode=True, send_notification=True):
-    check_packages(
+    reqs, to_install, python_conflicts, version_conflicts, missing_packages = check_packages(
         requirements,
         force_retry=args.force_retry,
         force_install=args.force_install,
@@ -1200,6 +1212,23 @@ def main():
         show=True if args.summary or args.check else True if not args.no_show else False,
         auto_mode=True if not args.no_install else False  # Always True now (default behavior)
     )
+
+    # if args.install and (not version_conflicts or not python_conflicts) and args.pypi:
+    if (not version_conflicts or not python_conflicts) and args.pypi:
+        console.print(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...")
+        p = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', args.pypi],
+            # capture_output=True, # To capture stdout and stderr
+            # text=True,           # To decode stdout/stderr as string (text)
+            check=False          # Set to False to not raise CalledProcessError
+        )
+        if p.returncode == 0:
+            # console.print(p.stdout)
+            console.print(f"✅ [bold #00FFFF]install package[/] [bold #00FFFF]`{args.pypi}`[/] [bold #00FFFF]successfully.[/]")
+        elif p.returncode != 0:
+            # console.print(p.stderr)
+            # console.print(p.stdout)
+            console.print(f"❌ [bold red]install package[/] [bold #FFFF00]`{args.pypi}`[/] [bold red blink]failed !.[/]")
 
 
 if __name__ == "__main__":
