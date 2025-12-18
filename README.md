@@ -3,7 +3,7 @@
 [![Python](https://img.shields.io/badge/Python-3.6%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-> 🔍 A smart Python package requirements checker that validates, installs, and manages your project dependencies with style!
+> 🔍 A smart Python package requirements checker that validates, installs, and manages your project dependencies with style!, it's like `go mod tidy` but with advanced
 
 ## ✨ Features
 
@@ -57,11 +57,15 @@ python pipr.py --help
 
 | Option                | Description                                          |
 |-----------------------|------------------------------------------------------|
-| `-f, --force-retry`   | Force retry installation automatically               |
-|                       |     if error occurs                                  |
-| `-F, --force-install` | Force install packages without asking for            |
-|                       |     confirmation                                     |
-| `-s, --summary`       | Show summary table only (non-interactive, no install)|
+|  -r, --recursive      | Scan Python files recursively in directory (used with --scan)|
+|  -f, --force-retry    | Force retry installation automatically if error occurs|
+|  -F, --force-install  | Force install packages without asking for confirmation|
+|  -s, --summary        | Show summary table only (non-interactive, no install)|
+|  -c, --check          | Same as '-s': show summary table only (non-interactive, no install)|
+|  -i, --pypi PYPI      | Compare package direct to package on pypi.org|
+|  -n, --no-install     | Don't auto install|
+|  -z, --no-show        | Don't show table and force no table|
+|  -d, --debug          | Debugging process (logging)|
 
 ### Requirements File Format
 
