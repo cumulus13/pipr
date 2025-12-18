@@ -38,9 +38,9 @@ except:
     import logging
 
     try:
-        from .custom_logging import get_logger
+        from .custom_logging import get_logger  # type: ignore
     except ImportError:
-        from custom_logging import get_logger
+        from custom_logging import get_logger  # type: ignore
     
     logging.getLogger('gntp').setLevel(logging.CRITICAL)
 
@@ -49,7 +49,7 @@ except:
 
 try:
     if HAS_RICHCOLORLOG:
-        from richcolorlog import print_exception as tprint
+        from richcolorlog import print_exception as tprint  # type: ignore
 except:
     def tprint(*args, **kwargs):
         traceback.print_exc()
@@ -74,15 +74,15 @@ try:
     HAS_RICH = True
 except:
     try:
-        from make_colors import Console
-        from make_colors.table import Table
-        from make_colors import Confirm
+        from make_colors import Console  # type: ignore
+        from make_colors.table import Table  # type: ignore
+        from make_colors import Confirm  # type: ignore
         HAS_MAKE_COLOR = False
     except:
         print("ERROR: please install `rich` or `make_colors` before !")
         sys.exit()
 
-if HAS_RICH:
+if HAS_RICH:  # type: ignore
     from rich import traceback as rtraceback
     rtraceback.install(show_locals=False, width=os.get_terminal_size()[0], theme='fruity', word_wrap=True)
 else:
@@ -96,7 +96,7 @@ from gntp.notifier import GrowlNotifier
 from licface import CustomRichHelpFormatter
 from typing import Set, Optional, List, Tuple
 
-from pypi_info import PyPIClient, PackageInfoDisplay
+from pypi_info import PyPIClient, PackageInfoDisplay  # type: ignore
 
 REQ_FILE = "requirements.txt"
 REQ_INSTALL_FILE = "requirements-install.txt"
@@ -184,7 +184,7 @@ def get_pypi_info(package_name):
     # Try using requests first
     if HAS_REQUESTS:
         try:
-            response = requests.get(url, timeout=5)
+            response = requests.get(url, timeout=5)  # type: ignore
             if response.status_code == 200:
                 return response.json()
             else:
@@ -214,10 +214,10 @@ def get_pypi_info(package_name):
                 logger.warning(f"Failed to fetch PyPI info for {package_name}: {response.status}")
                 return None
                 
-    except urllib.error.HTTPError as e:
+    except urllib.error.HTTPError as e:  # type: ignore
         logger.warning(f"HTTP Error fetching PyPI info for {package_name}: {e.code} - {e.reason}")
         return None
-    except urllib.error.URLError as e:
+    except urllib.error.URLError as e:  # type: ignore
         logger.warning(f"URL Error fetching PyPI info for {package_name}: {e.reason}")
         return None
     except Exception as e:
@@ -510,7 +510,7 @@ def parse_python_file(file_path: Path) -> List[Tuple[str, Optional[str]]]:
     if reqs:
         console.print(f"[bold green]✓ Parsed {file_path}:[/] [bold cyan]{len(reqs)} third-party packages[/]")
     
-    return reqs
+    return reqs  # type: ignore
 
 
 def parse_python_directory(directory: Path, recursive: bool = True) -> List[Tuple[str, Optional[str]]]:
@@ -524,7 +524,7 @@ def parse_python_directory(directory: Path, recursive: bool = True) -> List[Tupl
     if reqs:
         console.print(f"[bold green]✓ Parsed directory {directory}:[/] [bold cyan]{len(reqs)} unique third-party packages[/]")
     
-    return reqs
+    return reqs  # type: ignore
 
 
 def run_pip_install_from_file(file_path, force_retry=False):
@@ -711,7 +711,7 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                 emoji = "⚡"
             
             if show:
-                table.add_row(pkg, "", spec or "-", pypi_latest, emoji, status)
+                table.add_row(pkg, "", spec or "-", pypi_latest, emoji, status)  # type: ignore
             continue
 
         iv = version.parse(inst_ver)
@@ -748,10 +748,10 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                 send_growl(f"{pkg} Checked", f"{pkg} {inst_ver}", active=send_notification)
 
         if show:
-            table.add_row(pkg, inst_ver or "-", spec or "-", pypi_latest, emoji, status)
+            table.add_row(pkg, inst_ver or "-", spec or "-", pypi_latest, emoji, status)  # type: ignore
 
     if show:
-        console.print(table)
+        console.print(table)  # type: ignore
 
     if summary_only:
         # Do not install anything in summary mode
@@ -798,7 +798,7 @@ def _extract_from_list_node(node) -> Set[str]:
     if isinstance(node, ast.List):
         for elt in node.elts:
             val = elt.value if isinstance(elt, ast.Constant) else \
-                  elt.s if hasattr(elt, 's') else None
+                  elt.s if hasattr(elt, 's') else None  # type: ignore
             if val:
                 logger.notice(f"val: {val}")
                 deps.add(val)
@@ -970,7 +970,7 @@ def parse_pyproject_toml(pyproject_path = None) -> List[str]:
                             ver = ver.get('version')
                         logger.alert(f"dep: {dep}")
                         logger.alert(f"ver: {ver}")
-                        spec = convert_spec(ver)
+                        spec = convert_spec(ver)  # type: ignore
                         logger.alert(f"spec: {spec}")
                         if dep != 'python':
                             deps.add(f"{dep}{spec}")
@@ -1012,7 +1012,7 @@ def parse_setup_py(path = None) -> Set[str]:
         if str(os.getenv('TRACEBACK', '0').lower()) in ['1', 'yes', 'true']:
             tprint(*sys.exc_info(), None, False, True)
     logger.notice(f"deps: {deps}")
-    return deps
+    return deps  # type: ignore
 
 def get_requirements_from_pypi(package):
     try:
@@ -1048,7 +1048,7 @@ def main():
         prog='pipr'
     )
 
-    parser.add_argument('FILE', nargs='?', help="requirements file or Python file/directory to scan")
+    parser.add_argument('FILE', nargs='?', help="requirements file or Python file/directory to scan (requirements.txt, requirements-install.txt, setup.py, pypproject.toml or any file) if not provided then default is auto search based from requirements.txt -> requirements-install.txt -> setup.py -> pypproject.toml, if none of thems a file then default as PACKAGE_NAME", metavar="FILE/PACKAGE_NAME but if a DIRECTORY then it will be search/scan any python file from not builtin import modules")
     parser.add_argument("-r", "--recursive", action="store_true",
                         help="Scan Python files recursively in directory (used with --scan)")
     parser.add_argument("-f", "--force-retry", action="store_true",
@@ -1082,6 +1082,7 @@ def main():
     requirements = []
     is_python_file = False
     is_directory = False
+    is_pypi_package = False
 
     # Check if FILE argument is provided and what type it is
     if args.FILE:
@@ -1092,8 +1093,9 @@ def main():
             if file_path.suffix == '.py':
                 # It's a Python file - scan for imports
                 is_python_file = True
-                console.print(f"[cyan]🔍 Scanning Python file for imports:[/cyan] {file_path}")
-                requirements = parse_python_file(file_path)
+                # console.print(f"[bold #00FFFF]🔍 Scanning Python file for imports:[/] {file_path}")
+                with console.status(f"[bold #00FFFF]🔍 Scanning Python file for imports:[/] {file_path}", spinner='dots2'):
+                    requirements = parse_python_file(file_path)
             elif file_path.name.startswith('require') and file_path.suffix == '.txt':
                 # It's a requirements file
                 REQ_FILE = args.FILE
@@ -1112,18 +1114,32 @@ def main():
         elif file_path.is_dir():
             # It's a directory - scan all Python files
             is_directory = True
-            console.print(f"[cyan]🔍 Scanning directory for Python imports:[/cyan] {file_path}")
-            requirements = parse_python_directory(file_path, recursive=args.recursive)
+            # console.print(f"[bold #00FFFF]🔍 Scanning directory for Python imports:[/] {file_path}")
+            with console.status(f"[bold #00FFFF]🔍 Scanning directory for Python imports:[/] {file_path}", spinner='dots2'):
+                requirements = parse_python_directory(file_path, recursive=args.recursive)
         
         else:
-            console.print(f"\n:cross_mark: [red]File or directory not found:[/red] {args.FILE}\n")
-            parser.print_help()
-            sys.exit(1)
+            with console.status(f"🔎 [bold #577F00]trying search package on pypi.org for [/] [bold #FFFF00]`{args.FILE}`[/] [bold #577F00]...[/]", spinner='point'):
+                logger.debug(f"🔎 trying search package on pypi.org for `{args.FILE}` ...")
+                requirements = get_requirements_from_pypi(args.FILE)
+                is_pypi_package = True
+                if requirements:
+                    console.print(f"✅ [bold #FFFF00]found requirements on pypi.org for[/] [bold #00FFFF]`{args.FILE}`[/] [bold #FFFF00]...[/]")
+                    logger.debug(f"requirements: {requirements}")
+            if not is_pypi_package or not requirements:
+                console.print(f"\n:cross_mark: [red]File or directory not found:[/red] {args.FILE}\n")
+                parser.print_help()
+                sys.exit(1)
 
-    elif args.pypi:
+    elif args.pypi and not args.FILE:
         logger.debug("processing args.pypi ...")
-        requirements = get_requirements_from_pypi(args.pypi)
+        print("\n")
+        with console.status(f"🔎 [bold #577F00]trying find package on pypi.org for [/] [bold #FFFF00]`{args.pypi}`[/] [bold #577F00]...[/], [bold #FFAA00]if no conflicts this will be auto Auto-installing  ", spinner='point'):
+            requirements = get_requirements_from_pypi(args.pypi)
+            if requirements:
+                console.print(f"✅ [bold #FFFF00]found requirements on pypi.org for[/] [bold #00FFFF]`{args.pypi}`[/] [bold #FFFF00]...[/]")
         logger.debug(f"requirements: {requirements}")
+        # print("\n")
     else:
         logger.debug("processing alternative (else) ...")
         # No FILE argument - check for standard requirement files
@@ -1142,16 +1158,17 @@ def main():
 
         # If requirements-install.txt exists and is not empty -> install directly
         if Path(REQ_INSTALL_FILE) in REQ_FOUND:
-            console.print(f"[yellow]Found {REQ_INSTALL_FILE}, installing directly...[/yellow]")
+            console.print(f"[bold #FFFF00]Found {REQ_INSTALL_FILE}, installing directly...[/]")
             run_pip_install_from_file(REQ_INSTALL_FILE, force_retry=args.force_retry)
             sys.exit(0)
 
         if not REQ_FOUND:
             # No standard requirement files found, scan current directory for Python files
             console.print(f"[yellow]⚠️  No standard requirement files found.[/yellow]")
-            console.print(f"[cyan]🔍 Scanning current directory for Python imports...[/cyan]")
+            # console.print(f"[cyan]🔍 Scanning current directory for Python imports...[/cyan]")
             is_directory = True
-            requirements = parse_python_directory(Path.cwd(), recursive=args.recursive)
+            with console.status(f"[bold #00FFFF]🔍 Scanning current directory for Python imports...[/]", spinner='point'):
+                requirements = parse_python_directory(Path.cwd(), recursive=args.recursive)
             
             if len(requirements) < 1:
                 console.print(f"\n:cross_mark: [red]No Python files found or no imports detected![/red]\n")
@@ -1164,9 +1181,10 @@ def main():
             
             if len(requirements) < 1:
                 console.print(f"\n:cross_mark: [#FFFF00]'setup.py' has no requirements or no file ![/]")
-                console.print(f"\n🚀 [#00FFFF]try to get from 'pyproject.toml' ...[/]")
-                requirements = parse_pyproject_toml()
-                logger.warning(f"requirements: {requirements}")
+                # console.print(f"\n🚀 [#00FFFF]try to get from 'pyproject.toml' ...[/]")
+                with console.status(f"\n🚀 [#00FFFF]try to get from 'pyproject.toml' ...[/]", spinner='growVertical'):
+                    requirements = parse_pyproject_toml()
+                    logger.warning(f"requirements: {requirements}")
                 
                 if len(requirements) < 1:
                     console.print(f"\n:cross_mark: [#FFFF00]'pyproject.toml' has no requirements or no file ![/]")
@@ -1175,23 +1193,18 @@ def main():
     
     # If still no requirements found, try requirements.txt
     if len(requirements) < 1 and not is_python_file and not is_directory:
-        if not Path(REQ_FILE).exists():
-            console.print(f"\n:cross_mark: [red bold]File {REQ_FILE} not found![/]\n")
+        if not args.pypi and not Path(REQ_FILE).exists():
+            console.print(f"\n❌ [red bold]File {REQ_FILE} not found![/]\n")
             parser.print_help()
             sys.exit(1)
+        if not args.pypi:
+            logger.notice(f"REQ_FILE: {REQ_FILE}")
+            requirements = parse_requirements(REQ_FILE)
+            logger.warning(f"requirements: {requirements}")
         
-        logger.notice(f"REQ_FILE: {REQ_FILE}")
-        requirements = parse_requirements(REQ_FILE)
-        logger.warning(f"requirements: {requirements}")
-        
-        if len(requirements) < 1:
-            console.print(f"\n:cross_mark: [#FFFF00]requirements.txt is empty ![/]")
+        if len(requirements) < 1 and not args.pypi:
+            console.print(f"\n❌ [#FFFF00]requirements.txt is empty ![/]")
             sys.exit(1)
-
-    # Check if requests is available for PyPI checks
-    # if not HAS_REQUESTS:
-    #     console.print("\n[yellow]⚠️  'requests' module not installed. PyPI checks will be skipped.[/yellow]")
-    #     console.print("[cyan]Install with:[/cyan] pip install requests")
 
     if not HAS_REQUESTS:
         console.print("\n[cyan]ℹ️  'requests' module not found, using urllib as fallback for PyPI checks.[/cyan]")
@@ -1203,7 +1216,6 @@ def main():
         console.print(f"[bold cyan]📁 Detected directory scan mode {'(recursive)' if args.recursive else '(non-recursive)'}[/]")
 
     # Check and install packages (auto mode is now default)
-    # def check_packages(reqs, force_retry=False, force_install=False, summary_only=False, show=True, auto_mode=True, send_notification=True):
     reqs, to_install, python_conflicts, version_conflicts, missing_packages = check_packages(
         requirements,
         force_retry=args.force_retry,
@@ -1213,22 +1225,36 @@ def main():
         auto_mode=True if not args.no_install else False  # Always True now (default behavior)
     )
 
+    logger.debug(f"reqs: {reqs}")
+    logger.debug(f"args.force_retry: {args.force_retry}")
+    logger.debug(f"args.force_install: {args.force_install}")
+    logger.debug(f"args.summary: {args.summary}")
+    logger.debug(f"args.check: {args.check}")
+    logger.debug(f"args.no_show: {args.no_show}")
+    logger.debug(f"args.no_install: {args.no_install}")
+
+    logger.debug(f"to_install: {to_install}")
+    logger.debug(f"python_conflicts: {python_conflicts}")
+    logger.debug(f"version_conflicts: {version_conflicts}")
+    logger.debug(f"missing_packages: {missing_packages}")
+
     # if args.install and (not version_conflicts or not python_conflicts) and args.pypi:
     if (not version_conflicts or not python_conflicts) and args.pypi:
-        console.print(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...")
-        p = subprocess.run(
-            [sys.executable, '-m', 'pip', 'install', args.pypi],
-            # capture_output=True, # To capture stdout and stderr
-            # text=True,           # To decode stdout/stderr as string (text)
-            check=False          # Set to False to not raise CalledProcessError
-        )
-        if p.returncode == 0:
-            # console.print(p.stdout)
-            console.print(f"✅ [bold #00FFFF]install package[/] [bold #00FFFF]`{args.pypi}`[/] [bold #00FFFF]successfully.[/]")
-        elif p.returncode != 0:
-            # console.print(p.stderr)
-            # console.print(p.stdout)
-            console.print(f"❌ [bold red]install package[/] [bold #FFFF00]`{args.pypi}`[/] [bold red blink]failed !.[/]")
+        # console.print(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...")
+        with console.status(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...", spinner="material"):
+            p = subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', args.pypi],
+                # capture_output=True, # To capture stdout and stderr
+                # text=True,           # To decode stdout/stderr as string (text)
+                check=False          # Set to False to not raise CalledProcessError
+            )
+            if p.returncode == 0:
+                # console.print(p.stdout)
+                console.print(f"✅ [bold #00FFFF]install package[/] [bold #00FFFF]`{args.pypi}`[/] [bold #00FFFF]successfully.[/]")
+            elif p.returncode != 0:
+                # console.print(p.stderr)
+                # console.print(p.stdout)
+                console.print(f"❌ [bold red]install package[/] [bold #FFFF00]`{args.pypi}`[/] [bold red blink]failed !.[/]")
 
 
 if __name__ == "__main__":
