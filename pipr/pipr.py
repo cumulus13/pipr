@@ -193,6 +193,9 @@ def get_pypi_info(package_name):
         except Exception as e:
             logger.warning(f"Error fetching PyPI info for {package_name} using requests: {e}")
             # Don't return here, fallback to urllib
+    else:
+        console.print("\n[cyan]ℹ️  'requests' module not found, using urllib as fallback for PyPI checks.[/cyan]")
+
     
     # Fallback to urllib if requests is not available or failed
     try:
@@ -598,40 +601,40 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
     # if package_name and isinstance(package_name, (list or tuple)):
     #     version_conflicts, missing_packages = miss_conflict_check(package_name[0], package_name[1])
 
-    console.print("\n[cyan]🔎 Checking PyPI for package information...[/cyan]")
+    with console.status("[cyan]🔎 Checking PyPI for package information ...[/cyan]", spinner='point'):
     
-    for pkg, spec in reqs:
-        # Get PyPI info
-        pypi_data = get_pypi_info(pkg)
-        logger.debug(f"pypi_data: {pypi_data}")
-        
-        # Check Python version compatibility
-        if pypi_data:
-            requires_python = get_python_version_requirement(pypi_data)
-            logger.debug(f"requires_python: {requires_python}")
-            if requires_python:
-                logger.debug(f"requires_python: {requires_python}")
-                is_compatible, error_msg = check_python_version_compatibility(pkg, requires_python)
-                if not is_compatible:
-                    python_conflicts.append(error_msg)
-        
-        # Check if package is installed
-        version_conflicts, missing_packages = miss_conflict_check(pkg, spec)
-        # try:
-        #     inst_ver = metadata.version(pkg)
-        # except metadata.PackageNotFoundError:
-        #     inst_ver = None
-        
-        # # Check for version conflicts
-        # if inst_ver is not None and spec:
-        #     iv = version.parse(inst_ver)
-        #     spec_set = SpecifierSet(spec)
+        for pkg, spec in reqs:
+            # Get PyPI info
+            pypi_data = get_pypi_info(pkg)
+            logger.debug(f"pypi_data: {pypi_data}")
             
-        #     if iv not in spec_set:
-        #         version_conflicts.append((pkg, inst_ver, spec))
-        # elif inst_ver is None:
-        #     missing_packages.append((pkg, spec))
-    
+            # Check Python version compatibility
+            if pypi_data:
+                requires_python = get_python_version_requirement(pypi_data)
+                logger.debug(f"requires_python: {requires_python}")
+                if requires_python:
+                    logger.debug(f"requires_python: {requires_python}")
+                    is_compatible, error_msg = check_python_version_compatibility(pkg, requires_python)
+                    if not is_compatible:
+                        python_conflicts.append(error_msg)
+            
+            # Check if package is installed
+            version_conflicts, missing_packages = miss_conflict_check(pkg, spec)
+            # try:
+            #     inst_ver = metadata.version(pkg)
+            # except metadata.PackageNotFoundError:
+            #     inst_ver = None
+            
+            # # Check for version conflicts
+            # if inst_ver is not None and spec:
+            #     iv = version.parse(inst_ver)
+            #     spec_set = SpecifierSet(spec)
+                
+            #     if iv not in spec_set:
+            #         version_conflicts.append((pkg, inst_ver, spec))
+            # elif inst_ver is None:
+            #     missing_packages.append((pkg, spec))
+        
     # If there are Python version conflicts, abort
     if python_conflicts:
         console.print("\n[bold red]✗ Python Version Conflicts Detected:[/bold red]")
@@ -652,7 +655,9 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
         venv_name = f"{project_name}-env"
         
         # Create virtual environment with all requirements
-        return create_virtualenv(venv_name, reqs)
+        create_virtualenv(venv_name, reqs)
+
+        return reqs, [], python_conflicts, version_conflicts, missing_packages
     
     # No conflicts detected - proceed with normal installation (auto mode)
     if force_install:
@@ -687,7 +692,8 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
     for pkg, spec in reqs:
         try:
             inst_ver = metadata.version(pkg)
-        except metadata.PackageNotFoundError:
+        except metadata.PackageNotFoundError as e:
+            logger.error(e)
             inst_ver = None
 
         # Get PyPI info
@@ -696,6 +702,8 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
 
         status = ""
         emoji = ""
+
+        logger.warning(f"inst_ver: {inst_ver}")
 
         if inst_ver is None:
             # Package not installed - auto-install in auto_mode (now default)
@@ -709,6 +717,8 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
                 to_install.append(f"{pkg}{spec or ''}")
                 status = "[bold #FFFF00]Will auto-install[/]"
                 emoji = "⚡"
+            else:
+                to_install.append(f"{pkg}{spec or ''}")
             
             if show:
                 table.add_row(pkg, "", spec or "-", pypi_latest, emoji, status)  # type: ignore
@@ -768,6 +778,7 @@ def check_packages(reqs, force_retry=False, force_install=False, summary_only=Fa
         else:
             console.print("[bold red]❌ Some packages failed to install.[/]")
 
+    logger.notice(f"to_install: {to_install}")
     if not to_install:
         console.print("\n✅ [bold #FFAAFF]All requirements satisfied. Nothing to install.[/]")
 
@@ -1134,10 +1145,11 @@ def main():
     elif args.pypi and not args.FILE:
         logger.debug("processing args.pypi ...")
         print("\n")
-        with console.status(f"🔎 [bold #577F00]trying find package on pypi.org for [/] [bold #FFFF00]`{args.pypi}`[/] [bold #577F00]...[/], [bold #FFAA00]if no conflicts this will be auto Auto-installing  ", spinner='point'):
-            requirements = get_requirements_from_pypi(args.pypi)
-            if requirements:
-                console.print(f"✅ [bold #FFFF00]found requirements on pypi.org for[/] [bold #00FFFF]`{args.pypi}`[/] [bold #FFFF00]...[/]")
+        # with console.status(f"🔎 [bold #577F00]trying find package on pypi.org for [/] [bold #FFFF00]`{args.pypi}`[/] [bold #577F00]...[/], [bold #FFAA00]if no conflicts this will be auto Auto-installing  ", spinner='point'):
+        console.print(f"🔎 [bold #577F00]trying find package on pypi.org for [/] [bold #FFFF00]`{args.pypi}`[/] [bold #577F00]...[/] {'[bold #FFAA00]if no conflicts this will be auto Auto-installing' if not args.no_install else '[bold #FF5500]No-Auto-Install'}  [/]")
+        requirements = get_requirements_from_pypi(args.pypi)
+        if requirements:
+            console.print(f"✅ [bold #FFFF00]found requirements on pypi.org for[/] [bold #00FFFF]`{args.pypi}`[/] [bold #FFFF00]...[/]")
         logger.debug(f"requirements: {requirements}")
         # print("\n")
     else:
@@ -1206,9 +1218,7 @@ def main():
             console.print(f"\n❌ [#FFFF00]requirements.txt is empty ![/]")
             sys.exit(1)
 
-    if not HAS_REQUESTS:
-        console.print("\n[cyan]ℹ️  'requests' module not found, using urllib as fallback for PyPI checks.[/cyan]")
-
+    
     # Show mode info
     if is_python_file:
         console.print(f"[bold cyan]📄 Detected Python file mode[/]")
@@ -1240,21 +1250,27 @@ def main():
 
     # if args.install and (not version_conflicts or not python_conflicts) and args.pypi:
     if (not version_conflicts or not python_conflicts) and args.pypi:
+        if not to_install and not args.no_install:
+            return True
+        if args.no_install: return True
         # console.print(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...")
-        with console.status(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...", spinner="material"):
+        with console.status(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...", spinner="material") as status:
             p = subprocess.run(
                 [sys.executable, '-m', 'pip', 'install', args.pypi],
                 # capture_output=True, # To capture stdout and stderr
                 # text=True,           # To decode stdout/stderr as string (text)
-                check=False          # Set to False to not raise CalledProcessError
+                check=False,          # Set to False to not raise CalledProcessError
+                stdout=subprocess.PIPE if not args.debug else None,
+                stderr=subprocess.PIPE if not args.debug else None,
+
             )
             if p.returncode == 0:
                 # console.print(p.stdout)
-                console.print(f"✅ [bold #00FFFF]install package[/] [bold #00FFFF]`{args.pypi}`[/] [bold #00FFFF]successfully.[/]")
+                status.update(f"✅ [bold #00FFFF]install package[/] [bold #00FFFF]`{args.pypi}`[/] [bold #00FFFF]successfully.[/]")
             elif p.returncode != 0:
                 # console.print(p.stderr)
                 # console.print(p.stdout)
-                console.print(f"❌ [bold red]install package[/] [bold #FFFF00]`{args.pypi}`[/] [bold red blink]failed !.[/]")
+                status.update(f"❌ [bold red]install package[/] [bold #FFFF00]`{args.pypi}`[/] [bold red blink]failed !.[/]")
 
 
 if __name__ == "__main__":
