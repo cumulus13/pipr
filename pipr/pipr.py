@@ -1146,7 +1146,7 @@ def main():
         logger.debug("processing args.pypi ...")
         print("\n")
         # with console.status(f"🔎 [bold #577F00]trying find package on pypi.org for [/] [bold #FFFF00]`{args.pypi}`[/] [bold #577F00]...[/], [bold #FFAA00]if no conflicts this will be auto Auto-installing  ", spinner='point'):
-        console.print(f"🔎 [bold #577F00]trying find package on pypi.org for [/] [bold #FFFF00]`{args.pypi}`[/] [bold #577F00]...[/] {'[bold #FFAA00]if no conflicts this will be auto Auto-installing' if not args.no_install else '[bold #FF5500]No-Auto-Install'}  [/]")
+        console.print(f"🔎 [bold #577F00]trying find package on pypi.org for [/] [bold #FFFF00]`{args.pypi}`[/] [bold #577F00]...[/] {'[bold #FFAA00]if no conflicts this will be Auto-installing' if not args.no_install else '[bold #FF5500]No-Auto-Install'}  [/]")
         requirements = get_requirements_from_pypi(args.pypi)
         if requirements:
             console.print(f"✅ [bold #FFFF00]found requirements on pypi.org for[/] [bold #00FFFF]`{args.pypi}`[/] [bold #FFFF00]...[/]")
