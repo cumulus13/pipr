@@ -1,7 +1,7 @@
-from pipr import main as pipr
+from pipr import PIPR as pipr
 
 def main():
-	pipr()
+	pipr().main()
 
 if __name__ == '__main__':
 	main()

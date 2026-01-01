@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+
+# File: setup.py
+# Author: Hadi Cahyadi <cumulus13@gmail.com>
+# Date: 2026-01-02
+# Description: 
+# License: MIT
+
 from setuptools import setup, find_packages, Extension
 from setuptools.dist import Distribution
 from setuptools.command.build_py import build_py
@@ -6,8 +14,10 @@ import sys
 from pathlib import Path
 import shutil
 import os
-import re
+# import re
 import hashlib
+import glob 
+import traceback
 
 NAME = 'pipr'
 shutil.copy2('__version__.py', str(Path(NAME) / '__version__.py'))
@@ -77,7 +87,7 @@ class SdistWithBinaries(sdist):
 
 class BinaryDistribution(Distribution):
     """Distribution which always forces a binary package with platform name"""
-    def has_ext_modules(foo):
+    def has_ext_modules(foo):  # type: ignore
         return True
 
 def get_version():
@@ -298,5 +308,5 @@ setup(
     package_data={
         'pipr': ['*.png', f'*{sys.version_info.major}{sys.version_info.minor}*.pyd'] if sys.platform == 'win32' else [f'*{sys.version_info.major}{sys.version_info.minor}*.so', ],
     },
-    ext_modules=extensions,
+    ext_modules=extensions,  # type: ignore
 )
