@@ -15,28 +15,26 @@ import time
 import json
 import hashlib
 import pickle
-from base64 import b64encode, b64decode
+
+tprint = None  # type: ignore
+LOG_LEVEL = 'NO'
 
 if len(sys.argv) > 1 and any('--debug' == arg for arg in sys.argv):
     print("🐞 Debug mode enabled")
     os.environ["DEBUG"] = "1"
-    os.environ['LOGGING'] = "1"
     os.environ.pop('NO_LOGGING', None)
     os.environ['TRACEBACK'] = "1"
     os.environ["LOGGING"] = "1"
+    LOG_LEVEL = "DEBUG"
 else:
     os.environ['NO_LOGGING'] = "1"
 
 try:
-    from richcolorlog import setup_logging  # type: ignore
+    from richcolorlog import setup_logging, print_exception as tprint  # type: ignore
+    # print(f"LOG_LEVEL: {LOG_LEVEL}")
     logger = setup_logging(
         name="pipr",
-        level="DEBUG",
-        log_file_name="pipr.log",
-        log_file=True,
-        syslog=True,
-        syslog_host="127.0.0.1",
-        syslog_port=518,
+        level=LOG_LEVEL,
         exceptions=['gntp']
     )
     HAS_RICHCOLORLOG=True
@@ -49,14 +47,11 @@ except:
     except ImportError:
         from custom_logging import get_logger  # type: ignore
     
-    logging.getLogger('pipr').setLevel(logging.CRITICAL)
+    logging.getLogger('gntp').setLevel(logging.CRITICAL)
 
-    logger = get_logger('notif-center', level=logging.DEBUG)
+    logger = get_logger('pipr', level=getattr(logging, LOG_LEVEL.upper(), logging.CRITICAL))
 
-try:
-    if HAS_RICHCOLORLOG:
-        from richcolorlog import print_exception as tprint  # type: ignore
-except:
+if not tprint:
     def tprint(*args, **kwargs):
         traceback.print_exc()
 
@@ -481,7 +476,7 @@ class PIPR:
             cached_data = self.redis_manager._get_from_redis(cache_key)
             logger.emergency(f"cached_data: {cached_data}")
             if cached_data:
-                return cached_data
+                return cached_data, "cache hit 1"
         
         # Try file cache second
         if cache_key and Config.use_cache:
@@ -491,7 +486,7 @@ class PIPR:
                 # Promote to Redis cache for next time
                 if Config.use_redis:
                     redis_manager._save_to_redis(cache_key, cached_data)  # type: ignore
-                return cached_data
+                return cached_data, "cache hit 2"
         
         # Try using requests first
         if HAS_REQUESTS:
@@ -503,10 +498,10 @@ class PIPR:
                         self.redis_manager._save_to_redis(cache_key, data)
                     if Config.use_cache:
                         self.cache_manager._save_to_cache(cache_key, data)
-                    return data
+                    return data, ""
                 else:
                     logger.warning(f"Failed to fetch PyPI info for {package_name}: {response.status_code}")
-                    return None
+                    return None, f"[request] Failed to fetch PyPI info for {package_name}: {response.status_code}"
             except Exception as e:
                 logger.warning(f"Error fetching PyPI info for {package_name} using requests: {e}")
                 # Don't return here, fallback to urllib
@@ -534,20 +529,20 @@ class PIPR:
                         self.redis_manager._save_to_redis(cache_key, data)
                     if Config.use_cache:
                         self.cache_manager._save_to_cache(cache_key, data)
-                    return data
+                    return data, ""
                 else:
                     logger.warning(f"Failed to fetch PyPI info for {package_name}: {response.status}")
-                    return None
+                    return None, f"[urllib] Failed to fetch PyPI info for {package_name}: {response.status}" 
                     
         except urllib.error.HTTPError as e:  # type: ignore
             logger.warning(f"HTTP Error fetching PyPI info for {package_name}: {e.code} - {e.reason}")
-            return None
+            return None, f"HTTP Error fetching PyPI info for {package_name}: {e.code} - {e.reason}"
         except urllib.error.URLError as e:  # type: ignore
             logger.warning(f"URL Error fetching PyPI info for {package_name}: {e.reason}")
-            return None
+            return None, f"URL Error fetching PyPI info for {package_name}: {e.reason}"
         except Exception as e:
             logger.warning(f"Error fetching PyPI info for {package_name} using urllib: {e}")
-            return None
+            return None, f"Error fetching PyPI info for {package_name} using urllib: {e}"
 
     def get_python_version_requirement(self, pypi_data):
         """Extract Python version requirement from PyPI data."""
@@ -948,7 +943,11 @@ class PIPR:
                     inst_ver = None
 
                 # Get PyPI info
-                pypi_data = self.get_pypi_info(pkg)
+                pypi_data, error = self.get_pypi_info(pkg)
+                if error and not "hit" in error:
+                    console.print(f"❌ [bold red]No package[/] [bold #FFFF00]{pkg}[/] [bold red] at pypi.org ![/]")
+                    return False, f"❌ No package {pkg} at pypi.org !"
+
                 pypi_latest = pypi_data.get('info', {}).get('version', '-') if pypi_data else '-'
 
                 status = ""
@@ -1014,7 +1013,7 @@ class PIPR:
             if show:
                 console.print(table)  # type: ignore
 
-        return to_install
+        return to_install, ""
 
     def check_packages(self, reqs, force_retry=False, force_install=False, summary_only=False, show=True, auto_mode=True, send_notification=True, pypi_package_name = None): #, package_name = None):
         """Check installed packages vs requirements and collect installs if needed.
@@ -1022,7 +1021,9 @@ class PIPR:
         Args:
             auto_mode: Now defaults to True - auto-install if no conflicts detected
         """
+        error = ""
         logger.warning(f"reqs: {reqs}")
+        pypi_data = ""
         
         # Check PyPI for Python version requirements and detect conflicts
         python_conflicts = []
@@ -1037,9 +1038,11 @@ class PIPR:
             for pkg, spec in reqs:
                 status.update(f"[cyan]🔎 Checking PyPI for package information[/cyan] [bold #FFFF00]'{pkg}{spec}'[/] [cyan]...[/cyan]")
                 # Get PyPI info
-                pypi_data = self.get_pypi_info(pkg)
+                pypi_data, error = self.get_pypi_info(pkg)
                 # logger.debug(f"pypi_data: {pypi_data}")
-                
+                if error and not "hit" in error:
+                    console.print(f"❌ [bold red]No package[/] [bold #FFFF00]{pkg}[/] [bold red] at pypi.org ![/]")
+
                 # Check Python version compatibility
                 if pypi_data:
                     requires_python = self.get_python_version_requirement(pypi_data)
@@ -1072,7 +1075,7 @@ class PIPR:
         logger.alert(f"show: {show}")  # type: ignore
         if python_conflicts: auto_mode = False
         if show and reqs:
-            to_install = self.print_summary(reqs, show, summary_only, send_notification, auto_mode)
+            to_install, _ = self.print_summary(reqs, show, summary_only, send_notification, auto_mode)
 
         # If there are Python version conflicts, abort
         if python_conflicts:
@@ -1096,10 +1099,11 @@ class PIPR:
             # Create virtual environment with all requirements
             self.create_virtualenv(venv_name, reqs)
 
-            return reqs, [], python_conflicts, version_conflicts, missing_packages
+            return reqs, [], python_conflicts, version_conflicts, missing_packages, "create virtualenv", ""
         
         # No conflicts detected - proceed with normal installation (auto mode)
         if force_install:
+            tb = ""
             for pkg, spec in reqs:
                 cmd = [sys.executable, "-m", "pip", "install", f"{pkg}{spec or ''}"]
                 print(f"{' '.join(cmd)}")
@@ -1113,9 +1117,10 @@ class PIPR:
                                 subprocess.check_call(cmd)
                                 break
                             except Exception as e:
+                                tb = e
                                 console.print(f"[red]✗ Install error:[/red] {e}")
                                 self.send_growl("Install Error", f"Failed to install {pkg}", priority=2, active=send_notification)
-            return reqs, [], python_conflicts, version_conflicts, missing_packages
+            return reqs, [], python_conflicts, version_conflicts, missing_packages, "force install", tb
 
         if summary_only:
             # Do not install anything in summary mode
@@ -1133,13 +1138,16 @@ class PIPR:
                 console.print(f"[green]✅ Successfully installed {len(to_install)} package(s)[/]")
             else:
                 console.print("[bold red]❌ Some packages failed to install.[/]")
+                error = "❌ Some packages failed to install"
 
         if not to_install and reqs:
             console.print("\n✅ [bold #FFAAFF]All requirements satisfied. Nothing to install.[/]")
         elif not reqs:
-            console.print("\n⚠️  [bold yellow]No requirements specified.[/]")
+            if pypi_data:
+                console.print("\n⚠️  [bold yellow]No requirements specified.[/]")
+                error = "No requirements specified."
 
-        return reqs, to_install, python_conflicts, version_conflicts, missing_packages
+        return reqs, to_install, python_conflicts, version_conflicts, missing_packages, error, ""
 
     def _has_toml_support(self) -> bool:
         """Check if toml/tomli is available without importing them globally."""
@@ -1388,6 +1396,8 @@ class PIPR:
             display = PackageInfoDisplay()
 
             package_data = client.get_package_info(package)
+            if not package_data:
+                return []
             info = package_data.get('info', [])
             requires_dist = info.get('requires_dist', [])
             logger.debug(f"requires_dist: {requires_dist}")
@@ -1453,6 +1463,7 @@ class PIPR:
         """Check the status of all running processes"""
         for pkg, status in running_processes.items():
             console.print(f"{pkg}: {status}")
+
 
     def main(self):
         global REQ_FILE
@@ -1542,8 +1553,12 @@ class PIPR:
                     if requirements:
                         console.print(f"✅ [bold #FFFF00]found requirements on pypi.org for[/] [bold #00FFFF]`{args.FILE}`[/] [bold #FFFF00]...[/]")
                         logger.debug(f"requirements: {requirements}")
-                if not is_pypi_package or not requirements:
+                if not is_pypi_package:
                     console.print(f"\n:cross_mark: [red]File or directory not found:[/red] {args.FILE}\n")
+                    parser.print_help()
+                    sys.exit(1)
+                if not requirements:
+                    console.print(f"\n:cross_mark: [red]No requirements needed !:[/red] {args.FILE}\n")
                     parser.print_help()
                     sys.exit(1)
 
@@ -1632,7 +1647,7 @@ class PIPR:
             console.print(f"[bold cyan]📁 Detected directory scan mode {'(recursive)' if args.recursive else '(non-recursive)'}[/]")
 
         # Check and install packages (auto mode is now default)
-        reqs, to_install, python_conflicts, version_conflicts, missing_packages = self.check_packages(
+        reqs, to_install, python_conflicts, version_conflicts, missing_packages, error, _ = self.check_packages(
             requirements,
             force_retry=args.force_retry,
             force_install=args.force_install,
@@ -1641,6 +1656,9 @@ class PIPR:
             auto_mode=True if not args.no_install else False,  # Always True now (default behavior)
             pypi_package_name=args.pypi,
         )
+
+        if error and "not found" in error:
+            return False, error
 
         logger.debug(f"reqs: {reqs}")
         logger.debug(f"args.force_retry: {args.force_retry}")
@@ -1655,51 +1673,15 @@ class PIPR:
         logger.debug(f"version_conflicts: {version_conflicts}")
         logger.debug(f"missing_packages: {missing_packages}")
 
-        # if args.install and (not version_conflicts or not python_conflicts) and args.pypi:
         if (not version_conflicts or not python_conflicts) and args.pypi:
-            # if not to_install and not args.no_install:
-            #     return True
-            if args.no_install: return True
-            # console.print(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...")
-            # with console.status(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...", spinner="material") as status:
-            #     with open(self.log_path(args.pypi), 'w', encoding='utf-8') as f:
-            #         if sys.platform == 'win32':
-            #             p = subprocess.run(
-            #                 [sys.executable, '-m', 'pip', 'install', args.pypi],
-            #                 # capture_output=True, # To capture stdout and stderr
-            #                 # text=True,           # To decode stdout/stderr as string (text)
-            #                 check=False,          # Set to False to not raise CalledProcessError
-            #                 # stdout=subprocess.PIPE if not args.debug else None,
-            #                 # stderr=subprocess.PIPE if not args.debug else None,
-            #                 creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0,
-            #                 stdout=f,
-            #                 stderr=???
-            #             )
-            #         else:
-            #             # In Unix, there is no universal way. But we try to force a new terminal via xterm if there is one.
-            #             try:
-            #                 subprocess.Popen([
-            #                     "xterm", "-hold", "-e",
-            #                     "sh", "-c",
-            #                     f'exec "{sys.executable}" -u -m pip install "{args.pypi}" 2>&1 | tee "{log_file}"'
-            #                 ])
-            #             except FileNotFoundError:
-            #                 # If xterm doesn't exist, fallback: run in the background without a new terminal
-            #                 subprocess.Popen(
-            #                     [sys.executable, "-u", "-m", "pip", "install", args.pypi],
-            #                     stdout=f,
-            #                     stderr=???,
-            #                     start_new_session=True
-            #                 )
-            #     if p.returncode == 0:
-            #         # console.print(p.stdout)
-            #         status.update(f"✅ [bold #00FFFF]install package[/] [bold #00FFFF]`{args.pypi}`[/] [bold #00FFFF]successfully.[/]")
-            #     elif p.returncode != 0:
-            #         # console.print(p.stderr)
-            #         # console.print(p.stdout)
-            #         status.update(f"❌ [bold red]install package[/] [bold #FFFF00]`{args.pypi}`[/] [bold red blink]failed !.[/]")
+            _, _error = self.get_pypi_info(args.pypi)
+            if _error and not "hit" in _error:
+                console.print(f"❌ [bold red]No package[/] [bold #FFFF00]{args.pypi}[/] [bold red] at pypi.org ![/]")
+                return False, f"❌ No package {args.pypi} at pypi.org !"
 
-            with console.status(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF`{args.pypi}`[/] ...", spinner="material") as status:
+            if args.no_install: return True
+            
+            with console.status(f"🚩 [bold #FFAA00]start[/] [bold #AA55FF]install package[/] [bold #00FFFF]`{args.pypi}`[/] ...", spinner="material") as status:
                 log_file_stdout = self.log_path(args.pypi, std=True)
                 log_file_stderr = self.log_path(args.pypi, std=False)
                 
@@ -1710,7 +1692,8 @@ class PIPR:
             "{sys.executable}" -m pip install "{args.pypi}" > "{log_file_stdout}" 2> "{log_file_stderr}"
             if errorlevel 1 (
                 echo.
-                echo [ERROR] Installation failed! Press any key to close...
+                echo [ERROR] Installation "{args.pypi}" failed! Press any key to close...
+                sendgrowl pipr error ERROR "[ERROR] Installation "{args.pypi}" failed! Press any key to close..." -i C:\PROJECTS\images\pipr.png
                 pause >nul
             )
             """
@@ -1746,11 +1729,19 @@ class PIPR:
                              open(log_file_stderr, 'w', encoding='utf-8') as f_err:
                             try:
                                 # xterm with auto-pause on errors
-                                p = subprocess.Popen([
-                                    "xterm", "-hold", "-e", "sh", "-c",
-                                    f'"{sys.executable}" -u -m pip install "{args.pypi}" 2>&1 | tee "{log_file_stdout}"; '
-                                    f'if [ $? -ne 0 ]; then echo "\nPress Enter to close..."; read; fi'
-                                ])
+                                if 'linux' in sys.platform:
+                                    p = subprocess.Popen([
+                                        "xterm", "-hold", "-e", "sh", "-c",
+                                        f'"{sys.executable}" -u -m pip install "{args.pypi}" 2>&1 | tee "{log_file_stdout}"; '
+                                        f'if [ $? -ne 0 ]; then echo "\nPress Enter to close..."; read; fi'
+                                    ])
+                                elif sys.platform == 'win32':
+                                    p = subprocess.Popen(
+                                        [sys.executable, "-u", "-m", "pip", "install", args.pypi],
+                                        stdout=f_out,
+                                        stderr=f_err,
+                                        start_new_session=True
+                                    )    
                             except FileNotFoundError:
                                 # Fallback without xterm
                                 p = subprocess.Popen(
@@ -1783,8 +1774,9 @@ class PIPR:
                 
                 # The main thread can continue to install other packages
                 console.print(f"[dim]Process started for {args.pypi}, monitoring in background...[/]")
+                # print(f"LOG_LEVEL: {LOG_LEVEL}")
 
-
+        return True, ""
 
 if __name__ == "__main__":
     PIPR().main()
