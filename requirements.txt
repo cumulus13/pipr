@@ -4,3 +4,6 @@ gntp
 richcolorlog
 packaging
 requests
+pathlib3
+envdot
+git+https://github.com/cumulus13/pipinfo

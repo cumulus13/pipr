@@ -6,7 +6,7 @@
 # Description: Auto-install missing packages like 'go mod tidy' + detect imports from .py files
 # License: MIT
 
-from ntpath import isdir
+# from ntpath import isdir
 import os
 import sys
 import traceback
@@ -15,11 +15,12 @@ import time
 import json
 import hashlib
 import pickle
+from packaging.requirements import Requirement
 
 tprint = None  # type: ignore
 LOG_LEVEL = 'NO'
 
-if len(sys.argv) > 1 and any('--debug' == arg for arg in sys.argv):
+if (len(sys.argv) > 1 and any('--debug' == arg for arg in sys.argv)) or str(os.getenv("PIPR_DEBUG", "0")).lower() in ("1", "ok", "on", "true", "yes"):
     print("🐞 Debug mode enabled")
     os.environ["DEBUG"] = "1"
     os.environ.pop('NO_LOGGING', None)
@@ -60,7 +61,7 @@ try:
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
-    redis = None
+    redis = None  # type: ignore
 
 import platform
 import re
@@ -324,8 +325,8 @@ class RedisManager:
 
     def _get_from_redis(self, cache_key: str) -> Optional[Dict[str, Any]]:
         """Retrieve data from Redis cache"""
-        logger.alert(f"Config.use_redis: {Config.use_redis}")
-        logger.alert(f"Config.redis_client: {Config.redis_client}")
+        logger.alert(f"Config.use_redis: {Config.use_redis}")  # type: ignore
+        logger.alert(f"Config.redis_client: {Config.redis_client}")  # type: ignore
 
         if not Config.use_redis or not Config.redis_client:
             return None
@@ -445,7 +446,7 @@ class PIPR:
         if config_file:
             load_env(config_file)
             # Initialize Redis connection
-            self.redis_manager._init_redis()
+            # self.redis_manager._init_redis()
 
     def send_growl(self, title, message, priority=1, active = True):
         """Send notification via Growl."""
@@ -474,7 +475,7 @@ class PIPR:
         # Try Redis cache first (faster)
         if cache_key and Config.use_redis:
             cached_data = self.redis_manager._get_from_redis(cache_key)
-            logger.emergency(f"cached_data: {cached_data}")
+            logger.emergency(f"cached_data: {cached_data}")  # type: ignore
             if cached_data:
                 return cached_data, "cache hit 1"
         
@@ -702,8 +703,38 @@ class PIPR:
         except Exception as e:
             console.print(f"[red]✗ Failed to create virtual environment:[/red] {e}")
             if str(os.getenv('TRACEBACK', '0').lower()) in ['1', 'yes', 'true']:
-                tprint(*sys.exc_info(), None, False, True)
+                tprint(*sys.exc_info(), None, False, True)  # type: ignore
             return False
+
+    # def parse_requirements(self, file_path):
+    #     """Parse requirements.txt into a list of (package, specifier)."""
+    #     reqs = []
+    #     with open(file_path, "r", encoding="utf-8") as f:
+    #         for line in f:
+    #             line = line.strip()
+    #             if not line or line.startswith("#"):
+    #                 continue
+
+    #             # Handle conditional markers like sys_platform == "win32"
+    #             if ";" in line:
+    #                 pkg, cond = map(str.strip, line.split(";", 1))
+    #                 if "sys_platform" in cond:
+    #                     sys_name = platform.system().lower()
+    #                     if "win32" in cond and sys_name != "windows":
+    #                         continue
+    #                     if "linux" in cond and sys_name != "linux":
+    #                         continue
+    #                 line = pkg
+
+    #             match = re.match(r"([A-Za-z0-9_.-]+)(.*)", line)
+    #             logger.alert(f"match: {match}")  # type: ignore
+    #             if match:
+    #                 name, spec = match.groups()
+    #                 logger.info(f"name: {name}")
+    #                 spec = spec.strip()
+    #                 logger.info(f"spec: {spec}")
+    #                 reqs.append((name, spec if spec else None))
+    #     return reqs
 
     def parse_requirements(self, file_path):
         """Parse requirements.txt into a list of (package, specifier)."""
@@ -713,26 +744,27 @@ class PIPR:
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-
-                # Handle conditional markers like sys_platform == "win32"
-                if ";" in line:
-                    pkg, cond = map(str.strip, line.split(";", 1))
-                    if "sys_platform" in cond:
-                        sys_name = platform.system().lower()
-                        if "win32" in cond and sys_name != "windows":
-                            continue
-                        if "linux" in cond and sys_name != "linux":
-                            continue
-                    line = pkg
-
-                match = re.match(r"([A-Za-z0-9_.-]+)(.*)", line)
-                logger.alert(f"match: {match}")  # type: ignore
-                if match:
-                    name, spec = match.groups()
-                    logger.info(f"name: {name}")
-                    spec = spec.strip()
-                    logger.info(f"spec: {spec}")
-                    reqs.append((name, spec if spec else None))
+                
+                # Remove inline comments (simple approach)
+                if "#" in line:
+                    # Be careful with # inside quotes - this simple approach handles most cases
+                    line = line.split("#")[0].strip()
+                    if not line:
+                        continue
+                
+                try:
+                    # Parse with packaging.requirements (more robust)
+                    req = Requirement(line)
+                    spec = str(req.specifier) if req.specifier else None
+                    reqs.append((req.name, spec))
+                except Exception as e:
+                    logger.warning(f"Failed to parse requirement '{line}': {e}")
+                    # Fallback to regex
+                    match = re.match(r"([A-Za-z0-9_.-]+)(.*)", line)
+                    if match:
+                        name, spec = match.groups()
+                        reqs.append((name, spec.strip() if spec.strip() else None))
+        
         return reqs
 
     def extract_imports_from_file(self, file_path: Path) -> Set[str]:
@@ -785,7 +817,7 @@ class PIPR:
         except Exception as e:
             console.print(f"[yellow]Warning: [1] Could not parse {file_path}:[/] {e}")
             if str(os.getenv('TRACEBACK', '0').lower()) in ['1', 'yes', 'true']:
-                tprint(*sys.exc_info(), None, False, True)
+                tprint(*sys.exc_info(), None, False, True)  # type: ignore
         
         if cache_key:
             if Config.use_redis:
@@ -1124,7 +1156,7 @@ class PIPR:
 
         if summary_only:
             # Do not install anything in summary mode
-            return reqs, to_install, python_conflicts, version_conflicts, missing_packages
+            return reqs, to_install, python_conflicts, version_conflicts, missing_packages, "", ""
 
         logger.notice(f"to_install: {to_install}")  # type: ignore
 
@@ -1386,7 +1418,7 @@ class PIPR:
         except Exception as e:
             console.print(f"[bold yellow]Warning: [0] Could not parse setup.py:[/] {e}")
             if str(os.getenv('TRACEBACK', '0').lower()) in ['1', 'yes', 'true']:
-                tprint(*sys.exc_info(), None, False, True)
+                tprint(*sys.exc_info(), None, False, True)  # type: ignore
         logger.notice(f"deps: {deps}")  # type: ignore
         return deps  # type: ignore
 
@@ -1414,7 +1446,7 @@ class PIPR:
             # return deps if deps else []
 
         except Exception as e:
-            tprint(e)
+            tprint()  # type: ignore
 
         return []
 
